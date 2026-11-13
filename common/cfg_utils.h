@@ -151,7 +151,7 @@ typedef struct {
                                     * demodulated again with the FFT window
                                     * placed from the pilots' delay profile
                                     * (issue #26).  false (default) off. */
-    float    tx_gain_db;           /* Linear-equivalent gain on the modulator
+    float    tx_gain_db;            /* Linear-equivalent gain on the modulator
                                     * TX samples, in dB. 0.0 = no change.
                                     * Range -20.0 .. +20.0 (clamped). */
     int      tx_delay_ms;           /* Delay (ms) after PTT ON before audio is

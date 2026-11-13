@@ -37,7 +37,7 @@ first.
 | 20 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
 | 21 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
 | 22 | [24-qsy.md](24-qsy.md) | #24 | wire change, radio control | capability negotiation, busy detector, 10 | design only |
-| 23 | [25-vhf-uhf.md](25-vhf-uhf.md) | #25 | new modes and link timings | 00 (FM and wideband channel models), 15, 14, 23 | design only; FM-audio modes first (the owner has FM radios only), the wide profile (20-100 kHz through I/Q) stays a design until someone can test it |
+| 23 | [25-vhf-uhf.md](25-vhf-uhf.md) | #25 | new modes and link timings | 00 (FM and wideband channel models), 15, 14, 23 | design only; **on hold** until the owner has radios fit to test with (do not start it) |
 
 Update the status column and tick the task list in the issue as work lands.
 

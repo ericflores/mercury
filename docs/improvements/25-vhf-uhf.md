@@ -24,16 +24,19 @@ And settle, with numbers, what spread spectrum would add.
 
 ## Order of work on this fork
 
-The fork's owner has FM transceivers only, no transmitter driven with I/Q
-(asked 2026-11-13). So:
+**On hold.** The fork's owner has an FM transceiver but judges it a poor
+platform to test with, and has no transmitter driven with I/Q (said
+2026-11-13). Do not start any part of this proposal, the bench model
+included, until the owner says suitable radios are available. The design
+below stays as the record of what was worked out.
+
+When that changes:
 
 1. **A and B first** (FM-audio modes and the link timings), then D's FM
-   floor. Everything in them can be measured on the owner's bench with two
-   FM radios, a sound interface each and an attenuator or dummy loads; no
-   second station is needed.
-2. **C stays a design.** Its bench step (C1) is software and can be done at
-   any time, but C2 and C3 need hardware nobody here can test with. Do not
-   start them without a tester who has it.
+   floor. They need two FM radios, a sound interface each and an attenuator
+   or dummy loads; no second station.
+2. **C** needs a transmitter and receiver driven with I/Q. Its bench step
+   (C1) is software; C2 and C3 need someone who can test them.
 
 ## Facts
 

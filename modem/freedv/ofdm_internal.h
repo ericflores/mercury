@@ -113,6 +113,12 @@ struct OFDM_CONFIG {
   float EsNodB; /* EsNo est used for LDPC decoder */
 };
 
+/* Profile tracking (Mercury, docs/improvements/26): the heap state lives in
+ * ofdm.c, allocated when the feature is switched on. */
+struct OFDM_PT;
+#define OFDM_PT_MAXTRK 8   /* tracked paths */
+#define OFDM_PT_MAXPATHS 3 /* paths one frame's matching pursuit can report */
+
 struct OFDM {
   struct OFDM_CONFIG config;
 
@@ -223,6 +229,31 @@ struct OFDM {
   float *rx_amp_cp;
   complex float chanest_slope_cp;
 
+  /* Window placement from the pilots' delay profile (Mercury,
+   * docs/improvements/26): 0 = off.  When on, the samples shifted into rxbuf
+   * are counted and the state the demodulator starts a burst from is saved,
+   * so that a burst whose decode attempts all failed can be demodulated a
+   * second time (ofdm_profile_replay()) by a chain whose FFT window and frame
+   * grid follow the paths found in the pilot rows instead of the stock
+   * correlator.  The live demodulator is not changed by any of it.  The
+   * fields below the switch are the tracker's state: live in the replay's
+   * scratch copy of this struct, idle in the instance itself. */
+  int profile_track;
+  struct OFDM_PT *pt;
+  int64_t rx_count;      /* samples shifted into rxbuf so far */
+  int pt_replay;         /* this struct is a replay's scratch copy */
+  int pt_first, pt_last; /* in a replay: the loop's answer to "first/last frame" */
+  int pt_stock_timing;   /* test only: a replay with the stock timing tracker */
+  int pt_w;              /* the placed window, same coordinates as sample_point */
+  int pt_hold;           /* frames since a path was last seen */
+  int pt_ntrk;
+  float pt_trk[OFDM_PT_MAXTRK];  /* tracked path lags, relative to the window */
+  float pt_trkw[OFDM_PT_MAXTRK]; /* their weights */
+  int pt_trka[OFDM_PT_MAXTRK];   /* frames since each was seen */
+  int pt_npaths;                 /* last detection: paths found... */
+  int pt_lag[OFDM_PT_MAXPATHS];  /* ...and their lags */
+  int pt_delta;                  /* last placement: shift chosen */
+
   uint8_t tx_uw[MAX_UW_BITS];
   int *uw_ind;
   int *uw_ind_sym;
@@ -328,6 +359,41 @@ float ofdm_esno_est_dd(int bps, complex float *rx_sym, float *rx_amp, int nsym);
 float ofdm_snr_from_esno(struct OFDM *ofdm, float EsNodB);
 void ofdm_get_demod_stats(struct OFDM *ofdm, struct MODEM_STATS *stats,
                           complex float *rx_syms, int Nsymsperpacket);
+
+/* Profile tracking (docs/improvements/26-window-placement.md).
+ *
+ * ofdm_profile_paths(): matching pursuit on pilot rows seen through one FFT
+ * window.  H holds nrows rows of nc values, H[r*nc + i] = row_r[i+1] *
+ * conj(pilot[i+1]) (the carrier's value with the known symbol removed).  A
+ * path whose useful part starts -L samples after the window start (L negative:
+ * the window starts inside that path's prefix) rotates carrier i by
+ * exp(+j*2*pi*(i+1)*L/m).  Fills lag[] (-m/2 .. m/2-1, circular) and pw[]
+ * (energy explained per carrier) for up to OFDM_PT_MAXPATHS paths, strongest
+ * first, and ratio with the rows' energy over what the paths leave.  Returns
+ * the number of paths.  Needs the feature switched on (the lag table is
+ * allocated with it).
+ *
+ * ofdm_profile_place(): feeds one frame's paths to the tracks (ofdm->pt_*),
+ * chooses the shift of the window that leaves the least of another symbol
+ * inside it, applies it to ofdm->pt_w and to the tracks' lags and returns it.
+ * `first` starts the tracks afresh (a burst's first frame). */
+int ofdm_profile_paths(struct OFDM *ofdm, const complex float *H, int nrows,
+                       int *lag, float *pw, float *ratio);
+int ofdm_profile_place(struct OFDM *ofdm, int npaths, const int *lag,
+                       const float *pw, int first);
+void ofdm_profile_reset(struct OFDM *ofdm, int window);
+/* Demodulate the packet whose decode attempts have all just failed a second
+ * time, window and frame grid following the tracked paths, from the same
+ * samples.  Fills np*rowsperframe*nc symbols and amplitudes from the
+ * four-pilot-row estimate and returns the chain's own mean amplitude.
+ * Returns 0 when the first frame has left the buffer, the feature is off, or
+ * the packet is not the burst's first. */
+int ofdm_profile_replay(struct OFDM *ofdm, complex float *syms, float *amps,
+                        float *mean_amp);
+/* Test only: replay with the stock timing tracker instead of the new one. */
+void ofdm_profile_test_stock_timing(struct OFDM *ofdm, int on);
+/* Frames the last replay erased because their rows were past the buffer. */
+int ofdm_profile_nerased(struct OFDM *ofdm);
 
 #ifdef __cplusplus
 }

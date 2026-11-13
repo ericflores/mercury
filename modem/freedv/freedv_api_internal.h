@@ -229,6 +229,11 @@ struct freedv {
    * rx_decode_path 3 = delivered by it. */
   COMP *rx_syms_cp;
   float *rx_amps_cp;
+  /* Fifth attempt (docs/improvements/26): the packet demodulated a second
+   * time by the profile tracker's replay (allocated when the feature is
+   * switched on).  rx_decode_path 4 = delivered by it. */
+  COMP *rx_syms_pt;
+  float *rx_amps_pt;
   int rx_decode_path;
   float *harq_llr;
   int harq_llr_nbits;

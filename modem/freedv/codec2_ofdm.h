@@ -149,6 +149,12 @@ int ofdm_get_chanest_alt(struct OFDM *);
  * See docs/improvements/19-cp-recycling.md. */
 void ofdm_set_cp_recycle(struct OFDM *, int guard_samples);
 int ofdm_get_cp_recycle(struct OFDM *);
+/* Window placement from the pilots' delay profile: a last decode attempt that
+ * demodulates the burst again with the FFT window and the frame grid following
+ * the paths found in the pilot rows.  Off (0) by default; modes with fewer
+ * than 9 carriers refuse it.  See docs/improvements/26-window-placement.md. */
+void ofdm_set_profile_track(struct OFDM *, int on);
+int ofdm_get_profile_track(struct OFDM *);
 void ofdm_set_sync(struct OFDM *, int);
 void ofdm_set_tx_bpf(struct OFDM *, bool);
 void ofdm_set_dpsk(struct OFDM *ofdm, bool val);

@@ -203,6 +203,8 @@ void freedv_close(struct freedv *freedv) {
   FREE(freedv->rx_amps_alt);
   FREE(freedv->rx_syms_cp);
   FREE(freedv->rx_amps_cp);
+  FREE(freedv->rx_syms_pt);
+  FREE(freedv->rx_amps_pt);
   if (freedv->codec2) codec2_destroy(freedv->codec2);
 
   if (FDV_MODE_ACTIVE(FREEDV_MODE_1600, freedv->mode)) {
@@ -1743,6 +1745,30 @@ void freedv_set_cp_recycle(struct freedv *f, int guard_samples) {
 
 int freedv_get_cp_recycle(struct freedv *f) {
   return (f != NULL && f->ofdm != NULL) ? ofdm_get_cp_recycle(f->ofdm) : 0;
+}
+
+/* Window placement from the pilots' delay profile
+ * (docs/improvements/26-window-placement.md).  Switching it on allocates the
+ * packet buffers of the attempt; modes with fewer than 9 carriers refuse. */
+void freedv_set_profile_track(struct freedv *f, int on) {
+  if (f == NULL || f->ofdm == NULL) return;
+  if (on && f->rx_syms_pt == NULL) {
+    int nsyms = ofdm_get_bits_per_packet(f->ofdm) / f->ofdm->bps;
+    f->rx_syms_pt = (COMP *)CALLOC((size_t)nsyms, sizeof(COMP));
+    f->rx_amps_pt = (float *)CALLOC((size_t)nsyms, sizeof(float));
+    if (f->rx_syms_pt == NULL || f->rx_amps_pt == NULL) {
+      FREE(f->rx_syms_pt);
+      FREE(f->rx_amps_pt);
+      f->rx_syms_pt = NULL;
+      f->rx_amps_pt = NULL;
+      return;
+    }
+  }
+  ofdm_set_profile_track(f->ofdm, on);
+}
+
+int freedv_get_profile_track(struct freedv *f) {
+  return (f != NULL && f->ofdm != NULL) ? ofdm_get_profile_track(f->ofdm) : 0;
 }
 
 int freedv_get_rx_decode_path(struct freedv *f) {

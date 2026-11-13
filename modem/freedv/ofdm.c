@@ -65,6 +65,27 @@ static float est_freq_offset_pilot_corr(struct OFDM *, complex float *, int,
                                         int);
 static int ofdm_sync_search_core(struct OFDM *);
 static void ofdm_demod_core(struct OFDM *, int *);
+static void ofdm_pt_snapshot(struct OFDM *);
+static void ofdm_pt_track_frame(struct OFDM *, float);
+static void ofdm_pt_free(struct OFDM *);
+static void ofdm_pt_note_erased(struct OFDM *);
+
+/* "Is this the burst's first / last modem frame?"  The channel estimators and
+ * the profile tracker leave out the pilot row that is not a pilot there (the
+ * preamble above the first frame, nothing below the last).  A replay
+ * (docs/improvements/26) knows the answer from its loop and does not run the
+ * state machine, so it says so itself. */
+static inline int ofdm_frame_is_first(const struct OFDM *ofdm) {
+  return ofdm->pt_replay ? ofdm->pt_first
+                         : (ofdm->sync_state == trial && ofdm->sync_counter == 0);
+}
+
+static inline int ofdm_frame_is_last(const struct OFDM *ofdm) {
+  return ofdm->pt_replay
+             ? ofdm->pt_last
+             : (ofdm->sync_state == synced &&
+                ofdm->modem_frame == ofdm->np - 1);
+}
 
 /* Defines */
 
@@ -664,6 +685,7 @@ void ofdm_destroy(struct OFDM *ofdm) {
   if (ofdm->acq_inv) KISS_FFT_FREE(ofdm->acq_inv);
   if (ofdm->acq_buf) FREE(ofdm->acq_buf);
 
+  ofdm_pt_free(ofdm);
   FREE(ofdm->pilot_samples);
   FREE(ofdm->rxbuf);
   FREE(ofdm->pilots);
@@ -1338,6 +1360,7 @@ int ofdm_sync_search(struct OFDM *ofdm, COMP *rxbuf_in) {
           (ofdm->nrxbuf - ofdm->nin) * sizeof(complex float));
   memmove(&ofdm->rxbuf[(ofdm->nrxbuf - ofdm->nin)], rxbuf_in,
           ofdm->nin * sizeof(complex float));
+  ofdm->rx_count += ofdm->nin;
 
   return (ofdm_sync_search_core(ofdm));
 }
@@ -1353,6 +1376,7 @@ int ofdm_sync_search_shorts(struct OFDM *ofdm, short *rxbuf_in, float gain) {
 
   memmove(&ofdm->rxbuf[0], &ofdm->rxbuf[ofdm->nin],
           (ofdm->nrxbuf - ofdm->nin) * sizeof(complex float));
+  ofdm->rx_count += ofdm->nin;
 
   /* insert latest input samples onto tail of rxbuf */
 
@@ -1774,6 +1798,7 @@ void ofdm_demod(struct OFDM *ofdm, int *rx_bits, COMP *rxbuf_in) {
   for (i = 0, j = ofdm->nin; i < (ofdm->nrxbuf - ofdm->nin); i++, j++) {
     ofdm->rxbuf[i] = ofdm->rxbuf[j];
   }
+  ofdm->rx_count += ofdm->nin;
 
   /* insert latest input samples onto tail of rxbuf */
   for (j = 0, i = (ofdm->nrxbuf - ofdm->nin); i < ofdm->nrxbuf; j++, i++) {
@@ -1796,6 +1821,7 @@ void ofdm_demod_shorts(struct OFDM *ofdm, int *rx_bits, short *rxbuf_in,
   for (i = 0, j = ofdm->nin; i < (ofdm->nrxbuf - ofdm->nin); i++, j++) {
     ofdm->rxbuf[i] = ofdm->rxbuf[j];
   }
+  ofdm->rx_count += ofdm->nin;
 
   /* insert latest input samples onto tail of rxbuf */
   for (j = 0, i = (ofdm->nrxbuf - ofdm->nin); i < ofdm->nrxbuf; j++, i++) {
@@ -1887,8 +1913,8 @@ static void ofdm_chanest_alt(struct OFDM *ofdm, complex float **rows,
   int nc = ofdm->nc;
   complex float g[nc + 2];
   float wp = 1.0f, wt = 3.0f, wn = 3.0f, wf = 1.0f;
-  int first = (ofdm->sync_state == trial && ofdm->sync_counter == 0);
-  int last = (ofdm->sync_state == synced && ofdm->modem_frame == ofdm->np - 1);
+  int first = ofdm_frame_is_first(ofdm);
+  int last = ofdm_frame_is_last(ofdm);
   if (first) {
     wp = 0.0f;
     *slope_acc = 0.0f;
@@ -1936,7 +1962,12 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
   int prev_timing_est = ofdm->timing_est;
   int i, j, k, rr, st, en;
 
-  if (ofdm->rx_bpf_en) {
+  /* Profile tracking: save what a burst starts from (docs/improvements/26).
+   * Reads the instance, writes only the saved copy. */
+  if (ofdm->profile_track && !ofdm->pt_replay) ofdm_pt_snapshot(ofdm);
+
+  /* A replay works on samples the live pass already filtered. */
+  if (ofdm->rx_bpf_en && !ofdm->pt_replay) {
     assert(ofdm->rx_bpf != NULL);
     complex float *rxbuf_in = &ofdm->rxbuf[(ofdm->nrxbuf - ofdm->nin)];
     quisk_ccfFilter(rxbuf_in, rxbuf_in, ofdm->nin, ofdm->rx_bpf);
@@ -1947,9 +1978,13 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
    */
   float woff_est = TAU * ofdm->foff_est_hz / ofdm->fs;
 
+  /* A replay with the profile tracker in charge has no correlator: its window
+   * and its frame grid come from the paths found in the pilot rows. */
+  const int pt_track = ofdm->pt_replay && !ofdm->pt_stock_timing;
+
   /* update timing estimate ---------------------------------------------- */
 
-  if (ofdm->timing_en == true) {
+  if (ofdm->timing_en == true && !pt_track) {
     /* update timing at start of every frame */
 
     st = ofdm->rxbufst + ofdm->samplespersymbol + ofdm->samplesperframe -
@@ -1983,6 +2018,43 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
     ofdm->sample_point = max(ofdm->timing_est + 4, ofdm->sample_point);
     ofdm->sample_point =
         min(ofdm->timing_est + ofdm->ncp - 4, ofdm->sample_point);
+  }
+
+  /* Replay only: where the rows of this frame lie in the buffer.  The live
+   * demodulator is guaranteed its rows by nrxbufmin; a replay follows a grid
+   * of its own and may run out of samples at the end of the burst. */
+  int row_prev_ok = 1, row_future_ok = 1;
+  if (ofdm->pt_replay) {
+    if (pt_track && ofdm->timing_en == true)
+      ofdm_pt_track_frame(ofdm, woff_est);
+    int sp = ofdm->sample_point;
+    int ok = 1;
+    for (rr = 0; rr < (ofdm->ns + 1); rr++) {
+      st = ofdm->rxbufst + ofdm->samplespersymbol + ofdm->samplesperframe +
+           (rr * ofdm->samplespersymbol) + 1 + sp;
+      if (st < 0 || st + ofdm->m > ofdm->nrxbuf) ok = 0;
+    }
+    st = ofdm->rxbufst + ofdm->samplespersymbol + 1 + sp;
+    row_prev_ok = !(st < 0 || st + ofdm->m > ofdm->nrxbuf);
+    st = ofdm->rxbufst + ofdm->samplespersymbol + (3 * ofdm->samplesperframe) +
+         1 + sp;
+    row_future_ok = !(st < 0 || st + ofdm->m > ofdm->nrxbuf);
+    if (!ok) {
+      /* This pilot, the data or the next pilot is past the end of the
+       * samples: erase the frame whole (zero amplitude, zero soft bits) and
+       * keep the grid moving so the frames after it are erased too. */
+      size_t nsym = (size_t)ofdm->rowsperframe * (size_t)ofdm->nc;
+      memset(ofdm->rx_np, 0, nsym * sizeof(complex float));
+      memset(ofdm->rx_amp, 0, nsym * sizeof(float));
+      memset(ofdm->rx_np_alt, 0, nsym * sizeof(complex float));
+      memset(ofdm->rx_amp_alt, 0, nsym * sizeof(float));
+      ofdm_pt_note_erased(ofdm);
+      ofdm->rxbufst += ofdm->samplesperframe;
+      ofdm->nin = 0;
+      return;
+    }
+    /* A future pilot that is not there is treated as on a last frame. */
+    if (!row_future_ok) ofdm->pt_last = 1;
   }
 
   /*
@@ -2041,8 +2113,12 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
 
   /* down-convert at current timing instant------------------------------- */
 
-  for (k = 0, j = st; j < en; k++, j++) {
-    work[k] = ofdm->rxbuf[j] * cmplxconj(woff_est * j);
+  if (row_prev_ok) {
+    for (k = 0, j = st; j < en; k++, j++) {
+      work[k] = ofdm->rxbuf[j] * cmplxconj(woff_est * j);
+    }
+  } else {
+    memset(work, 0, sizeof(work));
   }
 
   /*
@@ -2135,8 +2211,12 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
 
   /* down-convert at current timing instant------------------------------- */
 
-  for (k = 0, j = st; j < en; k++, j++) {
-    work[k] = ofdm->rxbuf[j] * cmplxconj(woff_est * j);
+  if (row_future_ok) {
+    for (k = 0, j = st; j < en; k++, j++) {
+      work[k] = ofdm->rxbuf[j] * cmplxconj(woff_est * j);
+    }
+  } else {
+    memset(work, 0, sizeof(work));
   }
 
   /*
@@ -2386,12 +2466,513 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
     }
   }
 
+  /* The window moved with the grid: it is the same place in the signal */
+  if (pt_track) ofdm->pt_w = ofdm->sample_point;
+
+  if (ofdm->pt_replay) {
+    /* No new samples will arrive: the next frame is wherever this grid says,
+     * and its rows are checked against the end of the buffer. */
+    ofdm->rxbufst += ofdm->nin;
+    ofdm->nin = 0;
+    return;
+  }
+
   // use internal rxbuf samples if they are available
   int rxbufst_next = ofdm->rxbufst + ofdm->nin;
   if (rxbufst_next + ofdm->nrxbufmin <= ofdm->nrxbuf) {
     ofdm->rxbufst = rxbufst_next;
     ofdm->nin = 0;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Window placement from the pilots' delay profile
+ * (docs/improvements/26-window-placement.md)
+ *
+ * On long multipath (disturbed NVIS, two paths 7 ms apart against a 6 ms
+ * prefix) the stock receiver sits its FFT window at the head of the prefix of
+ * whichever path the detector found, and its timing tracker loses the burst
+ * when that path fades: DATAC1 delivers 12 of 60 frames at +7.8 dB and does not
+ * improve with SNR.  A chain that finds the paths in the pilot rows, remembers
+ * them while they fade and places the window (and the frame grid) among them
+ * delivered 58 of 60 on the same samples in the lab.
+ *
+ * Here it is a replay: when a packet's every decode attempt has failed, the
+ * burst is demodulated a second time from the samples the receiver still
+ * holds, by a scratch copy of this struct whose tracker owns the window and
+ * the grid.  The live demodulator, and so every frame it delivers today, is
+ * not touched.  All state is in the struct (no statics): instances run in
+ * different threads.
+ * ------------------------------------------------------------------------- */
+
+/* Tuning, as measured in the lab (prototype/lab3): a lag is a path when it
+ * explains PT_K times what a noise lag would and PT_FLOOR of the strongest. */
+#define PT_K 4.0f
+#define PT_FLOOR 0.1f
+#define PT_DUP_LAGS 4   /* two paths closer than this are one */
+#define PT_MATCH 10.0f  /* a path this near a track is that track */
+#define PT_AGE_DROP 25  /* frames unseen before a track is forgotten */
+#define PT_FADE 0.85f   /* per frame of age */
+#define PT_ISI_MARGIN 2 /* samples of margin each side of the prefix */
+
+struct OFDM_PT {
+  struct OFDM snap;    /* the demodulator's state on a burst's first frame */
+  struct OFDM scratch; /* the replay's working copy */
+  int64_t first_abs;   /* absolute sample index of that frame's rxbufst */
+  int have_first;
+  int nframes;         /* live frames demodulated since the snapshot */
+  int nerased;         /* frames the last replay erased */
+  complex float *tab;  /* exp(-j*2*pi*(i+1)*d/m), [d + m/2][i] */
+  /* the scratch copy's own buffers; the sample buffer is shared, read-only */
+  complex float **sym, **sym_cp;
+  complex float *np, *np_alt;
+  float *amp, *amp_alt, *aphase_log;
+  int *bits;
+};
+
+static void ofdm_pt_free(struct OFDM *ofdm) {
+  struct OFDM_PT *pt = ofdm->pt;
+  if (pt == NULL) return;
+  if (pt->sym != NULL)
+    for (int i = 0; i < ofdm->ns + 3; i++) FREE(pt->sym[i]);
+  if (pt->sym_cp != NULL)
+    for (int i = 0; i < ofdm->ns + 3; i++) FREE(pt->sym_cp[i]);
+  FREE(pt->sym);
+  FREE(pt->sym_cp);
+  FREE(pt->np);
+  FREE(pt->np_alt);
+  FREE(pt->amp);
+  FREE(pt->amp_alt);
+  FREE(pt->aphase_log);
+  FREE(pt->bits);
+  FREE(pt->tab);
+  FREE(pt);
+  ofdm->pt = NULL;
+}
+
+static int ofdm_pt_alloc(struct OFDM *ofdm) {
+  int nc = ofdm->nc, m = ofdm->m, i;
+  size_t nsym = (size_t)ofdm->rowsperframe * (size_t)nc;
+  struct OFDM_PT *pt = (struct OFDM_PT *)CALLOC(1, sizeof(struct OFDM_PT));
+  if (pt == NULL) return 0;
+  pt->tab =
+      (complex float *)CALLOC((size_t)m * (size_t)nc, sizeof(complex float));
+  pt->sym =
+      (complex float **)CALLOC((size_t)ofdm->ns + 3, sizeof(complex float *));
+  pt->sym_cp =
+      (complex float **)CALLOC((size_t)ofdm->ns + 3, sizeof(complex float *));
+  pt->np = (complex float *)CALLOC(nsym, sizeof(complex float));
+  pt->np_alt = (complex float *)CALLOC(nsym, sizeof(complex float));
+  pt->amp = (float *)CALLOC(nsym, sizeof(float));
+  pt->amp_alt = (float *)CALLOC(nsym, sizeof(float));
+  pt->aphase_log = (float *)CALLOC(nsym, sizeof(float));
+  pt->bits = (int *)CALLOC((size_t)ofdm->bitsperframe, sizeof(int));
+  int ok = pt->tab && pt->sym && pt->sym_cp && pt->np && pt->np_alt &&
+           pt->amp && pt->amp_alt && pt->aphase_log && pt->bits;
+  for (i = 0; ok && i < ofdm->ns + 3; i++) {
+    pt->sym[i] = (complex float *)CALLOC((size_t)nc + 2, sizeof(complex float));
+    pt->sym_cp[i] =
+        (complex float *)CALLOC((size_t)nc + 2, sizeof(complex float));
+    ok = pt->sym[i] && pt->sym_cp[i];
+  }
+  if (!ok) {
+    ofdm->pt = pt;
+    ofdm_pt_free(ofdm);
+    return 0;
+  }
+  /* exp(-j*2*pi*(i+1)*d/m) for every lag d in -m/2 .. m/2-1: the path search
+   * evaluates it nc * m * rows * 3 times a frame, and the lab's version, which
+   * called cos and sin there, was slow for it.  The phase is reduced modulo m
+   * in integers before it reaches the trigonometry. */
+  for (int di = 0; di < m; di++) {
+    int d = di - m / 2;
+    for (i = 0; i < nc; i++) {
+      long q = (((long)(i + 1) * d) % m + m) % m;
+      double a = -2.0 * M_PI * (double)q / (double)m;
+      pt->tab[(size_t)di * nc + i] = (float)cos(a) + (float)sin(a) * I;
+    }
+  }
+  ofdm->pt = pt;
+  return 1;
+}
+
+void ofdm_set_profile_track(struct OFDM *ofdm, int on) {
+  /* With fewer than 9 carriers a delay profile has nothing to resolve two
+   * paths with: those modes are left alone (docs/improvements/26, scope). */
+  if (!on || ofdm->nc < 9) {
+    ofdm->profile_track = 0;
+    return;
+  }
+  if (ofdm->pt == NULL && !ofdm_pt_alloc(ofdm)) {
+    ofdm->profile_track = 0;
+    return;
+  }
+  ofdm->profile_track = 1;
+}
+
+int ofdm_get_profile_track(struct OFDM *ofdm) { return ofdm->profile_track; }
+
+void ofdm_profile_test_stock_timing(struct OFDM *ofdm, int on) {
+  ofdm->pt_stock_timing = on;
+}
+
+static void ofdm_pt_note_erased(struct OFDM *ofdm) {
+  if (ofdm->pt != NULL) ofdm->pt->nerased++;
+}
+
+int ofdm_profile_nerased(struct OFDM *ofdm) {
+  return ofdm->pt != NULL ? ofdm->pt->nerased : 0;
+}
+
+/* On every live demodulator call while the feature is on: count the frames
+ * since a burst's first and, on that first frame, save the state the
+ * demodulator starts from.  A struct copy takes every field the core carries
+ * from frame to frame (timing_est, sample_point, foff_est_hz, mean_amp,
+ * clock_offset_counter, the estimator's accumulators) without a list to keep
+ * up to date; the pointers in it are shared and only the replay's scratch copy
+ * swaps its output buffers.  Burst mode only: the streaming state machine
+ * does not mark a packet's first frame. */
+static void ofdm_pt_snapshot(struct OFDM *ofdm) {
+  struct OFDM_PT *pt = ofdm->pt;
+  if (pt == NULL || strcmp(ofdm->data_mode, "burst") != 0) return;
+  if (ofdm->sync_state == trial && ofdm->sync_counter == 0) {
+    pt->snap = *ofdm;
+    pt->first_abs =
+        ofdm->rx_count - (int64_t)ofdm->nrxbuf + (int64_t)ofdm->rxbufst;
+    pt->have_first = 1;
+    pt->nframes = 0;
+  }
+  if (pt->have_first) pt->nframes++;
+}
+
+/* Matching pursuit on the pilot rows: see ofdm_internal.h.  Every lag is a
+ * hypothesis "one path, this far from the window"; the one that explains most
+ * of the rows' energy is taken, removed, and the next one looked for.  With 9
+ * carriers a transform with a taper has a main lobe over half of the lags and
+ * two paths 7 ms apart merge (docs/improvements/26: tried); this does not. */
+int ofdm_profile_paths(struct OFDM *ofdm, const complex float *H, int nrows,
+                       int *lag, float *pw, float *ratio) {
+  struct OFDM_PT *pt = ofdm->pt;
+  int nc = ofdm->nc, m = ofdm->m, half = m / 2, np = 0;
+  *ratio = 0.0f;
+  if (pt == NULL || nrows <= 0 || nrows > 4) return 0;
+  complex float R[4 * nc];
+  memcpy(R, H, sizeof(complex float) * (size_t)nrows * (size_t)nc);
+  float e0 = 0.0f;
+  for (int q = 0; q < nrows * nc; q++) e0 += cnormf(R[q]);
+  float eres = e0;
+  for (int it = 0; it < OFDM_PT_MAXPATHS; it++) {
+    float bestv = 0.0f;
+    int bestd = 0;
+    for (int di = 0; di < m; di++) {
+      const complex float *tab = &pt->tab[(size_t)di * nc];
+      float v = 0.0f;
+      for (int r = 0; r < nrows; r++) {
+        complex float c = 0.0f;
+        const complex float *row = &R[r * nc];
+        for (int i = 0; i < nc; i++) c += row[i] * tab[i];
+        v += cnormf(c);
+      }
+      if (v > bestv) {
+        bestv = v;
+        bestd = di;
+      }
+    }
+    float expl = bestv / (float)nc;
+    /* a noise lag explains eres/nc; a path must stand well above that */
+    if (expl <= 0.0f || expl < PT_K * eres / (float)nc) break;
+    if (np > 0 && expl < PT_FLOOR * pw[0]) break;
+    int d = bestd - half;
+    int dup = 0;
+    for (int j = 0; j < np; j++) {
+      int dd = abs(d - lag[j]);
+      if (dd > half) dd = m - dd;
+      if (dd < PT_DUP_LAGS) dup = 1;
+    }
+    if (dup) break;
+    lag[np] = d;
+    pw[np] = expl;
+    np++;
+    const complex float *tab = &pt->tab[(size_t)bestd * nc];
+    for (int r = 0; r < nrows; r++) {
+      complex float *row = &R[r * nc];
+      complex float a = 0.0f;
+      for (int i = 0; i < nc; i++) a += row[i] * tab[i];
+      a /= (float)nc;
+      for (int i = 0; i < nc; i++) row[i] -= a * conjf(tab[i]);
+    }
+    eres = 0.0f;
+    for (int q = 0; q < nrows * nc; q++) eres += cnormf(R[q]);
+  }
+  *ratio = e0 / (eres + 1E-20f);
+  return np;
+}
+
+/* Samples of another symbol inside a window that starts L samples after a
+ * path's useful part begins (L in [-ncp, 0] is clean, with a margin). */
+static float ofdm_pt_isi(int L, int ncp) {
+  int a = L > -PT_ISI_MARGIN ? L + PT_ISI_MARGIN : 0;
+  int b = L < -ncp + PT_ISI_MARGIN ? (-ncp + PT_ISI_MARGIN - L) : 0;
+  return (float)(a + b);
+}
+
+void ofdm_profile_reset(struct OFDM *ofdm, int window) {
+  ofdm->pt_w = window;
+  ofdm->pt_ntrk = 0;
+  ofdm->pt_hold = 0;
+  ofdm->pt_delta = 0;
+}
+
+/* Tracks and placement.  Lags are known modulo m (one symbol): each track
+ * keeps the multiple that put it where the earlier frames had it, so a path
+ * 7 ms behind another is not mistaken for one 9 ms ahead of it.  A path that
+ * fades keeps its track, and the window keeps a place for it, for
+ * PT_AGE_DROP frames. */
+int ofdm_profile_place(struct OFDM *ofdm, int npaths, const int *lag_in,
+                       const float *pw, int first) {
+  int ncp = ofdm->ncp, m = ofdm->m, half = m / 2;
+  int np = npaths > OFDM_PT_MAXPATHS ? OFDM_PT_MAXPATHS : npaths;
+  int lag[OFDM_PT_MAXPATHS], pk[OFDM_PT_MAXPATHS];
+  int assigned[OFDM_PT_MAXPATHS];
+  (void)first; /* the caller resets the tracks with ofdm_profile_reset() */
+  ofdm->pt_delta = 0;
+  for (int t = 0; t < ofdm->pt_ntrk; t++) ofdm->pt_trka[t]++;
+  if (np == 0) {
+    ofdm->pt_hold++;
+    return 0;
+  }
+  ofdm->pt_hold = 0;
+  for (int j = 0; j < np; j++) pk[j] = lag_in[j] + half; /* 0 .. m-1 */
+  int nas = 0;
+  float cs = 0.0f, ws = 0.0f;
+  for (int j = 0; j < np; j++) {
+    assigned[j] = 0;
+    int base = pk[j] - half;
+    float bestdist = 1E9f;
+    int bestl = base;
+    for (int t = 0; t < ofdm->pt_ntrk; t++) {
+      for (int k = -1; k <= 1; k++) {
+        float dd = fabsf((float)(base + m * k) - ofdm->pt_trk[t]);
+        if (dd < bestdist) {
+          bestdist = dd;
+          bestl = base + m * k;
+        }
+      }
+    }
+    if (ofdm->pt_ntrk > 0 && bestdist <= PT_MATCH) {
+      lag[j] = bestl;
+      assigned[j] = 1;
+      nas++;
+      cs += pw[j] * (float)lag[j];
+      ws += pw[j];
+    }
+  }
+  if (nas == 0 && ofdm->pt_ntrk > 0) {
+    /* none of the known paths is visible: place the new ones around them */
+    for (int t = 0; t < ofdm->pt_ntrk; t++) {
+      float a = ofdm->pt_trkw[t] * powf(PT_FADE, (float)ofdm->pt_trka[t]);
+      cs += a * ofdm->pt_trk[t];
+      ws += a;
+    }
+  }
+  if (nas == 0 && ofdm->pt_ntrk == 0) {
+    /* nothing known: the arrangement of the lags around the circle with the
+     * smallest spread (cut it at the largest gap), its centroid nearest the
+     * middle of the prefix; the stock detector leaves its own path between
+     * -44 and -4 */
+    int ord[OFDM_PT_MAXPATHS];
+    for (int j = 0; j < np; j++) ord[j] = j;
+    for (int i = 1; i < np; i++)
+      for (int j = i; j > 0 && pk[ord[j]] < pk[ord[j - 1]]; j--) {
+        int t = ord[j];
+        ord[j] = ord[j - 1];
+        ord[j - 1] = t;
+      }
+    int g0 = 0, gbest = -1;
+    for (int j = 0; j < np; j++) {
+      int nx = pk[ord[(j + 1) % np]] + (j + 1 == np ? m : 0);
+      int gap = nx - pk[ord[j]];
+      if (np == 1) gap = m;
+      if (gap > gbest) {
+        gbest = gap;
+        g0 = (j + 1) % np;
+      }
+    }
+    cs = 0.0f;
+    ws = 0.0f;
+    for (int j = 0; j < np; j++) {
+      int q = ord[j];
+      lag[q] = pk[q] + (j < g0 ? m : 0) - half;
+      cs += pw[q] * (float)lag[q];
+      ws += pw[q];
+    }
+    float cen = cs / (ws + 1E-20f), target = -(float)ncp / 2.0f;
+    int sh = 0;
+    float bd = fabsf(cen - target);
+    for (int k = -2; k <= 2; k++)
+      if (fabsf(cen + (float)m * (float)k - target) < bd) {
+        bd = fabsf(cen + (float)m * (float)k - target);
+        sh = m * k;
+      }
+    for (int j = 0; j < np; j++) lag[j] += sh;
+  } else {
+    float cen = cs / (ws + 1E-20f);
+    for (int j = 0; j < np; j++) {
+      if (assigned[j]) continue;
+      int base = pk[j] - half, bestl = base;
+      float bd = 1E9f;
+      for (int k = -1; k <= 1; k++)
+        if (fabsf((float)base + (float)m * (float)k - cen) < bd) {
+          bd = fabsf((float)base + (float)m * (float)k - cen);
+          bestl = base + m * k;
+        }
+      lag[j] = bestl;
+    }
+  }
+  for (int j = 0; j < np; j++) ofdm->pt_lag[j] = lag[j];
+  ofdm->pt_npaths = np;
+
+  /* refresh the tracks: seen paths replace their track or start one */
+  for (int j = 0; j < np; j++) {
+    int hit = -1;
+    for (int t = 0; t < ofdm->pt_ntrk; t++)
+      if (fabsf(ofdm->pt_trk[t] - (float)lag[j]) <= PT_MATCH) hit = t;
+    if (hit < 0 && ofdm->pt_ntrk < OFDM_PT_MAXTRK) {
+      hit = ofdm->pt_ntrk++;
+      ofdm->pt_trkw[hit] = pw[j];
+    }
+    if (hit >= 0) {
+      ofdm->pt_trk[hit] = (float)lag[j];
+      ofdm->pt_trkw[hit] = 0.5f * ofdm->pt_trkw[hit] + 0.5f * pw[j];
+      ofdm->pt_trka[hit] = 0;
+    }
+  }
+  int nt = 0;
+  for (int t = 0; t < ofdm->pt_ntrk; t++) {
+    if (ofdm->pt_trka[t] > PT_AGE_DROP) continue;
+    ofdm->pt_trk[nt] = ofdm->pt_trk[t];
+    ofdm->pt_trkw[nt] = ofdm->pt_trkw[t];
+    ofdm->pt_trka[nt] = ofdm->pt_trka[t];
+    nt++;
+  }
+  ofdm->pt_ntrk = nt;
+
+  /* the shift that leaves the least of another symbol inside the window; a
+   * path not seen now still counts, fading with its age; move only if that is
+   * strictly better than staying, so a lone path inside the prefix is never
+   * moved and the window stays where the stock receiver puts it */
+  float wgt[OFDM_PT_MAXTRK];
+  int tl[OFDM_PT_MAXTRK];
+  float wsum = 0.0f;
+  for (int t = 0; t < ofdm->pt_ntrk; t++) {
+    wgt[t] = ofdm->pt_trkw[t] * powf(PT_FADE, (float)ofdm->pt_trka[t]);
+    tl[t] = (int)lrintf(ofdm->pt_trk[t]);
+    wsum += wgt[t];
+  }
+  float c0 = 0.0f;
+  for (int t = 0; t < ofdm->pt_ntrk; t++)
+    c0 += wgt[t] * ofdm_pt_isi(tl[t], ncp);
+  c0 /= (wsum + 1E-20f);
+  float bestc = c0;
+  int bestd = 0;
+  for (int dl = -half; dl <= half; dl++) {
+    float c = 0.0f;
+    for (int t = 0; t < ofdm->pt_ntrk; t++)
+      c += wgt[t] * ofdm_pt_isi(tl[t] + dl, ncp);
+    c /= (wsum + 1E-20f);
+    if (c < bestc - 1E-4f) {
+      bestc = c;
+      bestd = dl;
+    }
+  }
+  if (bestd != 0) {
+    ofdm->pt_w += bestd;
+    for (int t = 0; t < ofdm->pt_ntrk; t++) ofdm->pt_trk[t] += (float)bestd;
+  }
+  ofdm->pt_delta = bestd;
+  return bestd;
+}
+
+/* One frame of the tracker inside the replay: look at the pilot rows through
+ * the current window, update the tracks, place the window, and make the
+ * existing quarter-symbol grid shift keep the grid centred on it (the stock
+ * code does that from timing_est; here timing_est is derived from the window,
+ * not measured). */
+static void ofdm_pt_track_frame(struct OFDM *ofdm, float woff_est) {
+  int nc = ofdm->nc, m = ofdm->m;
+  int first = ofdm_frame_is_first(ofdm), last = ofdm_frame_is_last(ofdm);
+  if (first) ofdm_profile_reset(ofdm, ofdm->sample_point);
+
+  complex float H[4 * nc];
+  int n = 0;
+  for (int pr = 0; pr < 4; pr++) {
+    /* the row above the first frame is the preamble, the one below the last
+     * is past the postamble: neither is a pilot row */
+    if (first && pr == 0) continue;
+    if (last && pr == 3) continue;
+    int st = ofdm->rxbufst + ofdm->samplespersymbol +
+             pr * ofdm->samplesperframe + 1 + ofdm->pt_w;
+    if (st < 0 || st + m > ofdm->nrxbuf) continue;
+    complex float work[m];
+    complex float row[nc + 2];
+    for (int k = 0; k < m; k++)
+      work[k] = ofdm->rxbuf[st + k] * cmplxconj(woff_est * (float)(st + k));
+    dft(ofdm, row, work);
+    for (int i = 1; i <= nc; i++)
+      H[n * nc + i - 1] = row[i] * conjf(ofdm->pilots[i]);
+    n++;
+  }
+  int lag[OFDM_PT_MAXPATHS];
+  float pw[OFDM_PT_MAXPATHS], ratio = 0.0f;
+  int np = ofdm_profile_paths(ofdm, H, n, lag, pw, &ratio);
+  ofdm_profile_place(ofdm, np, lag, pw, first);
+  ofdm->timing_est = ofdm->pt_w - ofdm->ncp / 2;
+  ofdm->sample_point = ofdm->pt_w;
+}
+
+int ofdm_profile_replay(struct OFDM *ofdm, complex float *syms, float *amps,
+                        float *mean_amp) {
+  struct OFDM_PT *pt = ofdm->pt;
+  if (!ofdm->profile_track || pt == NULL || !pt->have_first) return 0;
+  /* the live demodulator has run exactly this packet's frames since the
+   * snapshot: not a later packet of a multi-packet burst */
+  if (pt->nframes != ofdm->np) return 0;
+  /* where the burst's first frame is in the buffer now */
+  int64_t p = pt->first_abs - (ofdm->rx_count - (int64_t)ofdm->nrxbuf);
+  if (p < 0 || p >= (int64_t)ofdm->nrxbuf) return 0;
+
+  struct OFDM *s = &pt->scratch;
+  *s = pt->snap;
+  s->rxbufst = (int)p;
+  /* its own outputs; the sample buffer stays shared and is never written */
+  s->rx_sym = pt->sym;
+  s->rx_sym_cp = pt->sym_cp;
+  s->rx_np = pt->np;
+  s->rx_amp = pt->amp;
+  s->rx_np_alt = pt->np_alt;
+  s->rx_amp_alt = pt->amp_alt;
+  s->aphase_est_pilot_log = pt->aphase_log;
+  s->rx_bpf_en = false; /* the samples were filtered as they arrived */
+  s->cp_recycle = 0;
+  s->profile_track = 0;
+  s->chanest_alt = OFDM_CHANEST_T4; /* the attempt decodes from the t4 rows */
+  s->chanest_slope = 0.0f;
+  s->pt_replay = 1;
+  s->pt_stock_timing = ofdm->pt_stock_timing;
+  s->pt_ntrk = 0;
+  s->pt_hold = 0;
+  pt->nerased = 0;
+
+  size_t nsym = (size_t)s->rowsperframe * (size_t)s->nc;
+  for (int k = 0; k < s->np; k++) {
+    s->pt_first = (k == 0);
+    s->pt_last = (k == s->np - 1);
+    ofdm_demod_core(s, pt->bits);
+    memcpy(&syms[(size_t)k * nsym], s->rx_np_alt, nsym * sizeof(complex float));
+    memcpy(&amps[(size_t)k * nsym], s->rx_amp_alt, nsym * sizeof(float));
+  }
+  *mean_amp = s->mean_amp;
+  return 1;
 }
 
 /*

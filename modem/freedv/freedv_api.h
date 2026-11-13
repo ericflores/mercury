@@ -281,7 +281,7 @@ void freedv_set_acq_fft_enable(struct freedv *freedv, bool val);
  * more pilots.  The stock decode is untouched, so nothing that decodes
  * today is lost.  freedv_get_rx_decode_path: which attempt delivered the
  * last frame (0 stock, 1 HARQ combine, 2 alternative estimate, 3 alternative
- * estimate on recycled cyclic-prefix samples). */
+ * estimate on recycled cyclic-prefix samples, 4 profile-tracked replay). */
 void freedv_set_chanest_alt(struct freedv *freedv, int mode);
 int freedv_get_chanest_alt(struct freedv *freedv);
 /* Cyclic-prefix recycling for the OFDM data modes: one more decode attempt,
@@ -293,6 +293,15 @@ int freedv_get_chanest_alt(struct freedv *freedv);
  * docs/improvements/19-cp-recycling.md. */
 void freedv_set_cp_recycle(struct freedv *freedv, int guard_samples);
 int freedv_get_cp_recycle(struct freedv *freedv);
+/* Window placement from the pilots' delay profile, for the OFDM data modes
+ * with at least 9 carriers: when every earlier attempt has failed a packet,
+ * the burst is demodulated once more from the samples still held, with the
+ * FFT window and the frame grid following the paths found in the pilot rows,
+ * and decoded from that (decode path 4).  For channels whose delay spread is
+ * near or beyond the cyclic prefix.  0 = off (the default); modes with fewer
+ * carriers stay off.  docs/improvements/26-window-placement.md. */
+void freedv_set_profile_track(struct freedv *freedv, int on);
+int freedv_get_profile_track(struct freedv *freedv);
 int freedv_get_rx_decode_path(struct freedv *freedv);
 void freedv_set_timing_mx_thresh(struct freedv *freedv, float val);
 void freedv_set_bad_uw_errors(struct freedv *freedv, int val);

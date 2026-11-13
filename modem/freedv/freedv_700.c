@@ -526,8 +526,8 @@ static float freedv_snr_calib(int mode, float snr_raw) {
  * still has its 2^-16 chance at the CRC.  `codeword` must hold the longer of
  * the code length and the payload bits. */
 static int decode_packet_from_syms(struct freedv *f, complex float *syms,
-                                   float *amps, float EsNo, uint8_t *codeword,
-                                   int *pcc, int *iter) {
+                                   float *amps, float EsNo, float mean_amp,
+                                   uint8_t *codeword, int *pcc, int *iter) {
   struct OFDM *ofdm = f->ofdm;
   struct LDPC *ldpc = f->ldpc;
   int Nbitsperpacket = ofdm_get_bits_per_packet(ofdm);
@@ -544,7 +544,7 @@ static int decode_packet_from_syms(struct freedv *f, complex float *syms,
                                                    p_amps, p_txt, &txt_index);
   gp_deinterleave_comp(p_syms_de, p_syms, Npayloadsymsperpacket);
   gp_deinterleave_float(p_amps_de, p_amps, Npayloadsymsperpacket);
-  symbols_to_llrs(p_llr, p_syms_de, p_amps_de, EsNo, ofdm->mean_amp, ofdm->bps,
+  symbols_to_llrs(p_llr, p_syms_de, p_amps_de, EsNo, mean_amp, ofdm->bps,
                   Npayloadsymsperpacket);
   ldpc_decode_frame(ldpc, pcc, iter, codeword, p_llr);
   if (!ldpc_harq_combine_parity_ok(*pcc, ldpc->NumberParityBits)) return 0;
@@ -762,7 +762,7 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
           int alt_pcc = 0, alt_iter = 0;
           int alt_class = decode_packet_from_syms(
               f, (complex float *)f->rx_syms_alt, f->rx_amps_alt, EsNo,
-              alt_codeword, &alt_pcc, &alt_iter);
+              ofdm->mean_amp, alt_codeword, &alt_pcc, &alt_iter);
           if (alt_class != 0) {
             memcpy(f->rx_payload_bits, alt_codeword, Ndatabitsperpacket);
             crc_class = alt_class;
@@ -784,7 +784,7 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
           int cp_pcc = 0, cp_iter = 0;
           int cp_class = decode_packet_from_syms(
               f, (complex float *)f->rx_syms_cp, f->rx_amps_cp, EsNo,
-              cp_codeword, &cp_pcc, &cp_iter);
+              ofdm->mean_amp, cp_codeword, &cp_pcc, &cp_iter);
           if (cp_class != 0) {
             memcpy(f->rx_payload_bits, cp_codeword, Ndatabitsperpacket);
             crc_class = cp_class;
@@ -792,6 +792,34 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
             parityCheckCount = cp_pcc;
             iter = cp_iter;
             f->rx_decode_path = 3;
+          }
+        }
+        /* The burst demodulated a second time, with the FFT window and the
+         * frame grid following the paths found in the pilot rows
+         * (docs/improvements/26): on a channel whose delay spread is near or
+         * beyond the cyclic prefix the stock window sits at the head of one
+         * path's prefix and its timing tracker loses the burst when that path
+         * fades.  Last, only on failure, so it can only add frames; it must
+         * run here, before ofdm_sync_state_machine() zeroes the samples at
+         * the end of a burst.  The replay chain has its own soft-bit scale
+         * (mean_amp), which the LDPC decoder is very sensitive to. */
+        if (!crc_ok && ofdm->profile_track && f->rx_syms_pt != NULL) {
+          float pt_mean_amp = 0.0f;
+          if (ofdm_profile_replay(ofdm, (complex float *)f->rx_syms_pt,
+                                  f->rx_amps_pt, &pt_mean_amp)) {
+            uint8_t pt_codeword[codeword_len];
+            int pt_pcc = 0, pt_iter = 0;
+            int pt_class = decode_packet_from_syms(
+                f, (complex float *)f->rx_syms_pt, f->rx_amps_pt, EsNo,
+                pt_mean_amp, pt_codeword, &pt_pcc, &pt_iter);
+            if (pt_class != 0) {
+              memcpy(f->rx_payload_bits, pt_codeword, Ndatabitsperpacket);
+              crc_class = pt_class;
+              crc_ok = 1;
+              parityCheckCount = pt_pcc;
+              iter = pt_iter;
+              f->rx_decode_path = 4;
+            }
           }
         }
         if (!crc_ok && f->verbose) {

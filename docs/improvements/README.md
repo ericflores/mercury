@@ -14,8 +14,8 @@ first.
 
 | order | spec | issue | kind | depends on | status |
 |---|---|---|---|---|---|
-| 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | not started |
-| 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | prototype measured |
+| 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`); impairment library, inverter presets, replay to do |
+| 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | implemented behind `MERCURY_CHANEST`, bench findings in `docs/CHANNEL-ESTIMATION-FINDINGS.md`; ini key, false-accept controls, offset runs, Pi timing, integration A/B to do |
 | 2 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
 | 3 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |
 | 4 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | evidence in tree |

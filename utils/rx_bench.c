@@ -20,7 +20,13 @@
  *                      one more attempt after the others (proposal 19); with
  *                      no t4* token it uses t4f3, or t4 on modes of fewer
  *                      than 9 carriers
- *             e.g. stock,t4f5,t4f5+cp4,t4f5+cp20
+ *               pt     window placement from the pilots' delay profile as one
+ *                      more attempt after the others, the burst demodulated
+ *                      again with the tracker in charge of the FFT window and
+ *                      the frame grid (proposal 26); decodes from the t4 rows
+ *                      whatever estimator token is given; modes of fewer than
+ *                      9 carriers refuse it
+ *             e.g. stock,t4f5,t4f5+cp4,t4f5+cp20,pt,t4f3+cp4+pt
  *   tone      an unmodulated carrier at tone_hz, tone_db relative to the
  *             burst's total power
  *   imp       imp_rate noise bursts per second, 2 ms each, imp_db above the
@@ -51,21 +57,28 @@ static bench_rng rng = {1357911131517ULL};
 static double gauss(void) { return bench_rng_gauss(&rng); }
 static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
 
-typedef struct { int chanest; int cp; char name[64]; } variant_t;
+typedef struct { int chanest; int cp; int pt; char name[64]; } variant_t;
 
 /* Parse one variant: '+'-joined exact tokens.  0 on success. */
 static int parse_variant(const char *s, variant_t *v) {
   char tmp[64];
-  int have_est = 0, have_cp = 0, have_stock = 0;
+  int have_est = 0, have_cp = 0, have_stock = 0, have_pt = 0;
   if (strlen(s) >= sizeof(tmp) || !*s) return -1;
   strcpy(tmp, s);
   strcpy(v->name, s);
   v->chanest = OFDM_CHANEST_OFF;
   v->cp = 0;
+  v->pt = 0;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -1;
     if (!strcmp(t, "stock")) { have_stock = 1; continue; }
+    else if (!strcmp(t, "pt")) {
+      if (have_pt) { fprintf(stderr, "variant '%s': two pt tokens\n", s); return -1; }
+      have_pt = 1;
+      v->pt = 1;
+      continue;
+    }
     else if (!strcmp(t, "t4")) est = OFDM_CHANEST_T4;
     else if (!strcmp(t, "t4f3")) est = OFDM_CHANEST_T4F3;
     else if (!strcmp(t, "t4f5")) est = OFDM_CHANEST_T4F5;
@@ -84,10 +97,10 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt\n", t, s);
     return -1;
   }
-  if (have_stock && (have_est || have_cp)) {
+  if (have_stock && (have_est || have_cp || have_pt)) {
     fprintf(stderr, "variant '%s': 'stock' cannot be combined\n", s);
     return -1;
   }
@@ -126,6 +139,11 @@ int main(int argc, char **argv) {
     freedv_set_frames_per_burst(rx[k], 1);
     freedv_set_chanest_alt(rx[k], v[k].chanest);
     freedv_set_cp_recycle(rx[k], v[k].cp);
+    freedv_set_profile_track(rx[k], v[k].pt);
+    if (freedv_get_profile_track(rx[k]) != v[k].pt) {
+      fprintf(stderr, "variant '%s': %s has too few carriers for profile tracking\n", v[k].name, argv[1]);
+      return 1;
+    }
     if (freedv_get_cp_recycle(rx[k]) != v[k].cp) {
       fprintf(stderr, "variant '%s': guard %d is longer than the %s prefix\n", v[k].name, v[k].cp, argv[1]);
       return 1;

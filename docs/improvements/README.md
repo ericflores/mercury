@@ -1,0 +1,283 @@
+# Improvement programme: handbook
+
+This directory is the working specification for the proposals tracked in
+[issue #1](https://github.com/ericflores/mercury/issues/1). It is written so
+that a developer (or a coding agent) who was not part of the investigation can
+implement any one proposal without rediscovering the code.
+
+Read this file first, then the spec of the proposal you are working on.
+
+## Status and order
+
+Work top to bottom unless told otherwise. "Depends on" lists what must exist
+first.
+
+| order | spec | issue | kind | depends on | status |
+|---|---|---|---|---|---|
+| 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | not started |
+| 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | prototype measured |
+| 2 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
+| 3 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |
+| 4 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | evidence in tree |
+| 5 | [03-directed-acquisition.md](03-directed-acquisition.md) | #3 | receiver only | 00 | not measured |
+| 6 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | not measured |
+| 7 | [06-mfsk-metrics.md](06-mfsk-metrics.md) | #6 | receiver only | 00 | not measured |
+| 8 | [05-apriori-redecode.md](05-apriori-redecode.md) | #5 | receiver only | 09 (fallback path) | not measured |
+| 9 | [12-osd.md](12-osd.md) | #12 | receiver only | nothing | not measured |
+| 10 | [11-diversity.md](11-diversity.md) | #11 | receiver only, needs hardware | nothing | not measured |
+| 11 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream |
+| 12 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
+| 13 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
+| 14 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
+| 15 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
+
+Update the status column and tick the task list in the issue as work lands.
+
+## The four rules
+
+1. **One switch per feature, off by default.** With the switch off, behaviour
+   and (for the modem) output samples and decoded bytes are identical to
+   trunk. Prove it with a test.
+2. **Receiver-only before wire changes.** A receiver-only feature must work
+   against an unmodified peer.
+3. **Wire changes are negotiated.** A peer that does not announce the
+   capability gets today's frames, bit for bit.
+4. **Measured, not asserted.** Every feature lands with its bench table and a
+   findings document in `docs/` (see `docs/CLIPPED-QAM16C2-FINDINGS.md` and
+   `docs/ACQ-TUNING-FINDINGS.md` for the house style: question, answer,
+   method, tables, caveats, how to reproduce).
+
+The project's own history shows why rule 4 matters: a plausible ladder change
+was implemented and then rejected because the bench showed −23 % throughput
+(`docs/FADE-CLIFF-DECISION.md`, "Update 2026-07-05"). Do not change a tuned
+constant in `datalink_arq/carousel.c` without the sim matrix that set it.
+
+## Repository map for this work
+
+| path | what it is |
+|---|---|
+| `modem/freedv/` | vendored codec2 (OFDM modem, LDPC), with Mercury changes. C, built into `libfreedvdata.a`. |
+| `modem/freedv/ofdm.c` | OFDM modulator, acquisition, demodulator, sync state machines. `ofdm_demod_core()` at about line 1783. |
+| `modem/freedv/ofdm_mode.c` | per-mode parameters (carriers, pilots, cyclic prefix, thresholds, clipper, LDPC code name). |
+| `modem/freedv/freedv_700.c` | per-packet receive path: symbol buffer, de-interleave, LLRs, LDPC, CRC, HARQ fallback (`freedv_comp_short_rx_ofdm`, about line 518). |
+| `modem/freedv/mpdecode_core.c` | soft demapper (`Demod2D`, `Somap`, `symbols_to_llrs`) and the sum-product LDPC decoder. |
+| `modem/freedv/freedv_api.{c,h}` | public API. Bench-facing setters live here (`freedv_set_timing_mx_thresh`, `freedv_set_tx_clip_config`). |
+| `modem/mfsk/` | the non-coherent 32-tone MFSK floor modem. Soft demod in `mfsk.c:392-470`. |
+| `modem/modem.c` | glue: mode pool, TX audio building, RX thread, per-plane decoder workers. |
+| `modem/modem_backend.h`, `modem_freedv.c`, `modem_mfsk.c` | the backend vtable and its two implementations. New per-instance controls are added here as optional, null-checked hooks. |
+| `datalink_arq/carousel.{c,h}` | the data plane: blocks, pieces, rounds, polls, link adaptation. |
+| `datalink_arq/arq_fsm.c`, `arq_protocol.{c,h}` | connect/teardown state machine, CALL/ACCEPT frames, mode timing table, SNR thresholds. |
+| `common/watterson.{c,h}` | the HF channel model and its named presets. |
+| `common/cfg_utils.{c,h}`, `common/mercury_engine.c` | ini keys and where they are applied at start-up. |
+| `utils/` | bench instruments. `bench_common.{c,h}` and `chanutil.{c,h}` are the shared parts. |
+| `tests/` | Unity unit tests; `tests/sim/` is the deterministic two-station protocol simulator. |
+| `tests/integration/` | Go tests that run two real `mercury` processes over simulated audio. |
+| `specs/` | TLA+ models of the carousel, connect, turns, teardown. Protocol changes update these. |
+| `docs/` | findings and design records. `MODES.md`, `CAROUSEL-ARQ.md`, `CAROUSEL-SPEC.md`, `CHANNEL-MODEL.md` are required reading. |
+
+## Build and test commands (verified on Linux)
+
+```sh
+make -C modem/freedv libfreedvdata.a -j8     # the modem library, a few seconds
+make -C utils                                 # all bench tools
+make -C tests test                            # every unit test (what CI's "UT" job runs via `make test`)
+make -C tests test_carousel && ./tests/test_carousel       # one test
+make -C tests carousel_bench && SIM_STATS=1 ./tests/carousel_bench 1 clean   # protocol sim, one run
+make                                          # the mercury binary (needs the audio/UI dependencies)
+make integration-test                         # Go integration tests (needs `make` first)
+make -C tests SANITIZE_ASAN_UBSAN=1 test      # what the Sanitizers job runs
+```
+
+CI workflows are in `.github/workflows/`: `ut.yml` (amd64 and i386),
+`integration.yml`, `sanitizers.yml` (TSan, ASan+UBSan), `build.yml`. New code
+must be clean under `-Wall -Wextra` in `utils/` and under both sanitizers.
+
+## How to add a switch
+
+Environment variable (quick A/B, read once):
+
+```c
+static int feature_enabled(void) {
+    const char *e = getenv("MERCURY_FEATURE");
+    return e && e[0] == '1';          /* default OFF: unset means off */
+}
+```
+
+Existing examples: `harq_enabled()` in `modem/modem.c:2008` (default on),
+`MERCURY_NAV` and `MERCURY_SHORT_RUNG` in `datalink_arq/arq_fsm.c:827-836`.
+New features default **off**, so test for `'1'`, not for "not `'0'`".
+
+Ini key (persistent), following `tx_gain_db` / `max_keydown_s`:
+
+1. `common/cfg_utils.h`: a `CFG_KEY_*` macro (`"section:key"`) and a field in
+   the config struct.
+2. `common/cfg_utils.c`: default (about line 68-75), read with
+   `iniparser_get*` (about line 435-463), write (about line 594-606).
+3. `common/mercury_engine.c:194-195`: apply it at start-up by calling a setter
+   (`arq_set_*` or `modem_set_*`).
+4. `mercury.ini.example`: document the key in its section.
+5. The environment variable, when set, overrides the ini value.
+
+Per-decoder-instance controls go through the backend vtable
+(`modem/modem_backend.h`): add an optional function pointer, implement it in
+`modem/modem_freedv.c` (and `modem_mfsk.c` if it applies), and null-check at
+the call site, exactly as `set_harq` / `harq_reset` are done. Apply it where
+instances are opened or bound: `pool_open_mode_locked()` (`modem.c:656`) and
+`rx_decoder_bind_mode()` (`modem.c:2050`).
+
+Changes inside `modem/freedv/` should stay small and guarded by a field that
+defaults to the stock behaviour, with a `freedv_set_*` / `freedv_get_*` pair
+in `freedv_api.{c,h}`.
+
+## Measurement method
+
+- **SNR3k** is signal power over noise power in 3 kHz. On AWGN it is set
+  directly. On a fading preset the knob is the noise density `No` and the
+  achieved SNR3k is measured and reported per row; `SNR3k ≈ −No + A` with `A`
+  depending on the waveform's average power at the normalised peak (for
+  DATAC1 at the bench's peak of 4000, `A ≈ −30.1`; for QAM16C2 `A ≈ −34.4`).
+- **Equal peak.** Bursts are normalised to one peak (`HEADROOM_PEAK` 4000 in
+  the tools), leaving int16 headroom for noise. Comparisons between waveforms
+  of different PAPR must say whether they are at equal peak or equal average
+  power (`docs/CLIPPED-QAM16C2-FINDINGS.md` explains why it matters).
+- **Paired trials.** Every variant must decode the *same* samples. Build the
+  whole impaired buffer first, then feed it to each variant's decoder. Follow
+  the RNG discipline in `utils/bench_common.h` (fixed draw counts, pre-drawn
+  tail).
+- **Acquired / delivered.** Acquired = the decoder reached full
+  `FREEDV_RX_SYNC` (trial sync does not count). Delivered = a frame came out
+  with CRC ok **and** its bytes equal what was sent.
+- **Stock row first.** The stock variant is always a column, and it must
+  reproduce the documented benches (`docs/MODES.md`,
+  `docs/ACQ-TUNING-FINDINGS.md`) before any other column is believed.
+- **Trials.** 100 per point minimum for a findings document; 200 where the
+  delivery is below 20 % or above 80 %.
+- **Channels.** At least AWGN, `ccir-poor`, `itur-mdv` (disturbed NVIS, 7 ms)
+  and `ccir-flutter`. List with `utils/watterson_test --list-presets`.
+- **Neutrality control.** A receiver feature must show no loss where there is
+  nothing for it to fix (clean channel, high SNR, every rung).
+- **False accepts.** Any feature that adds decode attempts must run a
+  noise-only and a wrong-session control and report how many frames passed
+  CRC that should not have.
+- **Protocol effect.** Modem-level gains are then checked end to end:
+  `tests/sim` (60-100 seeds per channel, as in the comments of `carousel.c`)
+  and `tests/integration` (`MERCURY_CH_ENGINE=watterson MERCURY_CH_FADING=...
+  MERCURY_CH_NO=... go test -C tests/integration -run 'TestMercuryARQTransfer$'`;
+  two builds with `MERCURY_TEST_BIN_A` / `MERCURY_TEST_BIN_B`).
+
+## Wire format constraints (read before any protocol change)
+
+**The POLL has no free bit.** `encode_ctl()` in `datalink_arq/carousel.c:453`
+uses all 14 bytes:
+
+| byte | bits |
+|---|---|
+| 0 | type (2: 0 POLL, 1 REQ, 2 STATUS, 3 POLL-ending), has_data (1), poll id (4), ctl_deaf (1) |
+| 1 | rung (3), frames asked (4), SNR bit 0 |
+| 2 | loss (4), window base (4) |
+| 3-9 | 8 × 7 bits: pieces each open block still needs (127 = unseen) |
+| 10 | first missing data piece of the base block (255 = none) |
+| 11 | SNR bits 5-3, handover rung (3), SNR bits 2-1 |
+| 12 | handover frames (4), handover round id (4) |
+| 13 | highest block (4), unopened (1), short_rung (1), backlog (2) |
+
+Ways to carry something new, in order of preference:
+
+1. **Reinterpret existing fields under a negotiated capability.** For example
+   a repeat request can reuse bytes 3-9 as a frame bitmap when a marker says
+   so.
+2. **The escape code.** `decode_ctl()` drops a frame whose rung or handover
+   rung is ≥ `CAR_NLEVELS` (7). Rung value 7 is therefore unused and an old
+   peer discards it as corrupt. It can mark an extended control frame, but
+   note that proposal 15 wants value 7 for a new rung; the two must be
+   reconciled before either lands.
+3. **A longer control frame** in a new mode. Last resort.
+
+**Capability negotiation.** CALL and ACCEPT carry a 2-bit minor revision
+(`ARQ_CONNECT_MINOR`, currently 1; `arq_protocol.h:442-476`,
+`arq_protocol_connect_minor()`). An ACCEPT with a reserved bit set is dropped
+by current stations, so capabilities cannot simply be put in the ACCEPT's
+zero bytes. The intended scheme, to be designed once and shared by all wire
+proposals:
+
+- Minor revision 2 means "I understand capability bits".
+- The caller announces minor 2 in its CALL. A callee that also has minor ≥ 2
+  answers with its capability bits in ACCEPT bytes 10-13 (zero today); to a
+  minor-1 caller it answers exactly as today.
+- Each side then uses a feature only if both announced it. The caller's own
+  bits travel in its first control frame or in spare CALL bytes after the
+  arithmetic-coded callsign, whichever the design finds room for.
+- `specs/connect/` (TLA+) and `docs/CAROUSEL-SPEC.md` are updated in the same
+  change, and `tests/datalink_arq/test_arq_protocol.c` gets the mixed-version
+  cases (`test_connect_other_version_refused` is the model).
+
+Design this once, as its own small change, before the first wire proposal.
+
+## Conventions
+
+- **Language:** C (gnu11). No new dependencies.
+- **Commits:** `area: what changed, in plain words` (`carousel: ...`,
+  `tnc: ...`, `utils: ...`, `docs: ...`). One logical change per commit.
+- **Comments:** the house style explains *why* with the measurement that
+  justified it. Keep that up; cite the bench and the numbers.
+- **Tests:** Unity (`tests/unity`). Add the binary to `TEST_BINS` in
+  `tests/Makefile` with a rule like `test_freedv_harq`'s (line 258). Tests
+  must be deterministic (seeded) and fast.
+- **Logging:** `HLOGI/HLOGW/HLOGD(component, fmt, ...)`; `car_trace()` inside
+  the carousel.
+- **Branch:** `claude/mercury-adaptive-modem-o5hsi7` on this fork. One draft
+  PR per proposal is easiest to review.
+
+## Pitfalls already paid for
+
+These cost time during the prototype; do not repeat them.
+
+1. **Smoothing channel estimates across carriers needs phase-slope removal.**
+   The FFT window may start anywhere in a 5 ms span inside the cyclic prefix
+   (`ofdm.c`, "keep sample_point inside cyclic prefix"), which rotates
+   adjacent carriers by tens of degrees. Averaging neighbours without
+   de-rotating delivered 0/20 at +5 dB while looking fine at 0 dB and +15 dB.
+   Always test a feature at several SNRs, not only at the cliff.
+2. **The first and last modem frame of a burst lack a pilot row.** The
+   "previous" pilot of the first frame is the preamble (different amplitude
+   scaling) and the "future" pilot of the last frame is past the postamble.
+   Detect them with `sync_state == trial && sync_counter == 0` and
+   `sync_state == synced && modem_frame == np - 1`.
+3. **The LDPC decoder is very sensitive to LLR scale.** At DATAC17's AWGN
+   cliff, changing the fixed `EsNodB` from 3 to 0 or 6 took delivery from
+   26/60 to 0/60. Anything that changes soft-bit magnitudes (weights,
+   combining, a new estimator) must re-check the scale. The HARQ code
+   averages instead of summing for this reason (`freedv_700.c:640-652`).
+4. **`modem/freedv/ofdm.c:2112` overwrites the amplitude estimate** chosen by
+   `amp_est_mode` a few lines above. Know this before reasoning about
+   amplitudes.
+5. **Modes differ in cyclic prefix:** 6 ms for the DATAC modes, 4 ms for
+   QAM16C2 (`ofdm_mode.c`).
+6. **Bench output is block-buffered when redirected.** `fflush(stdout)` after
+   every row or a long run looks dead.
+7. **`strtod("0e6")` is zero times ten to the sixth.** Do not use `e` as a
+   field letter in a compact variant syntax.
+8. **A fading run is slow at the cliff** (each failed LDPC decode runs 100
+   iterations). Budget minutes per row for the 16200-bit modes.
+9. **Frame sizes identify modes** in several places (`arq_protocol.c`, the
+   note on DATAC13). A new mode needs a payload size no other mode has.
+10. **The session streams data to the application before the block CRC-32 is
+    checked** (`deliver_in_order`, `carousel.c:1452`). A failed block check
+    ends the session on purpose.
+
+## Glossary
+
+- **Rung / level:** a payload mode's position in the ladder (0 MFSK, 1
+  DATAC15, 2 DATAC4, 3 DATAC3, 4 DATAC1, 5 DATAC17, 6 QAM16C2).
+- **Round:** one keydown of up to N data frames, sent in answer to a POLL.
+- **Piece / block:** 23-24 byte unit of the erasure code / up to 96 pieces
+  that any K of rebuild.
+- **LLR:** log-likelihood ratio, the soft value of one coded bit.
+- **Pilot row:** the known symbol at the start of each modem frame (every
+  `ns` = 5 symbols) used to estimate the channel.
+- **Modem frame / packet / burst:** 5 OFDM symbols / `np` modem frames
+  carrying one LDPC codeword / preamble + packet(s) + postamble.
+- **Control-deaf:** a peer that hears this station below DATAC16's reach; its
+  control then goes on the MFSK floor.
+- **Cliff:** the SNR range, often under 1 dB wide, where a mode goes from
+  delivering nothing to delivering everything.

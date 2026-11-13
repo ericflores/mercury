@@ -1979,12 +1979,24 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
   float woff_est = TAU * ofdm->foff_est_hz / ofdm->fs;
 
   /* A replay with the profile tracker in charge has no correlator: its window
-   * and its frame grid come from the paths found in the pilot rows. */
+   * and its frame grid come from the paths found in the pilot rows.
+   *
+   * Except on the burst's first frame.  The burst search does not reset
+   * timing_est and sample_point (only the streaming search does), so a burst
+   * starts from whatever the previous one left, and it is the first frame's
+   * timing update that puts the window back inside the prefix of the path the
+   * detector found.  The tracker starts from that corrected window, as the
+   * lab receiver did: its first unwrapping assumes the detected path lies
+   * inside the prefix, which a window left over from a burst the stock
+   * tracker lost (tens of samples off) does not guarantee.  Measured on the
+   * same seeds, the two starts are within one frame of each other (DATAC3
+   * itur-mdv 52 and 53 of 60 against 51 and 53; DATAC1 55, 48 and 30
+   * either way), so this is for robustness, not for the tables. */
   const int pt_track = ofdm->pt_replay && !ofdm->pt_stock_timing;
 
   /* update timing estimate ---------------------------------------------- */
 
-  if (ofdm->timing_en == true && !pt_track) {
+  if (ofdm->timing_en == true && (!pt_track || ofdm->pt_first)) {
     /* update timing at start of every frame */
 
     st = ofdm->rxbufst + ofdm->samplespersymbol + ofdm->samplesperframe -

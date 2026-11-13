@@ -76,6 +76,28 @@ static int cp_recycle_setting(void)
     return atoi(e);
 }
 
+/* Window placement from the pilots' delay profile (docs/improvements/26): one
+ * more decode attempt, after the others, from the burst demodulated again
+ * with the FFT window and the frame grid following the paths found in the
+ * pilot rows.  Receiver only.  OFF unless asked for: audio:rx_profile_track
+ * in the ini (modem_freedv_set_profile_track(), before the instances are
+ * opened) or MERCURY_PROFILE_TRACK=1, which wins when set (any other value
+ * switches it off).  Modes with fewer than 9 carriers ignore it. */
+static int g_profile_track = 0;
+
+void modem_freedv_set_profile_track(int on)
+{
+    g_profile_track = on ? 1 : 0;
+}
+
+static int profile_track_setting(void)
+{
+    const char *e = getenv("MERCURY_PROFILE_TRACK");
+    if (!e || !*e)
+        return g_profile_track;
+    return e[0] == '1';
+}
+
 static void *fdv_open(int mode)
 {
     /* FSK_LDPC needs an advanced open (was open_freedv_mode_locked in modem.c).
@@ -91,6 +113,7 @@ static void *fdv_open(int mode)
     {
         freedv_set_chanest_alt(f, chanest_for_mode(mode));
         freedv_set_cp_recycle(f, cp_recycle_setting());
+        freedv_set_profile_track(f, profile_track_setting());
     }
     return f;
 }

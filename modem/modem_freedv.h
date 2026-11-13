@@ -25,4 +25,9 @@ void modem_freedv_set_chanest(int mode);
  * MERCURY_CP_RECYCLE when that is set. */
 void modem_freedv_set_cp_recycle(int guard_samples);
 
+/* Window placement from the pilots' delay profile for instances opened from
+ * now on: 0 = off (default), 1 = on.  Overridden by MERCURY_PROFILE_TRACK
+ * when that is set. */
+void modem_freedv_set_profile_track(int on);
+
 #endif /* MERCURY_MODEM_FREEDV_H */

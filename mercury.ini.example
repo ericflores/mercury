@@ -169,6 +169,19 @@ rx_chanest = off
 ; on the air.  MERCURY_CP_RECYCLE=<samples> overrides it.
 rx_cp_recycle = 0
 
+; One more decode attempt for OFDM frames that every other attempt failed, for
+; channels whose delay spread is near or beyond the cyclic prefix (disturbed
+; NVIS: two paths 7 ms apart against a 6 ms prefix; issue #26).  The burst is
+; demodulated a second time from the samples the receiver still holds, with
+; the FFT window and the frame grid following the paths found in the pilot
+; rows instead of the stock timing tracker, which loses the burst when its
+; path fades.  Receiver only: it works with any peer.  Modes with fewer than
+; 9 carriers ignore it.  true or false (default false).  Bench-measured only
+; (docs/PROFILE-TRACKING-FINDINGS.md); not yet tried on the air.  Costs one
+; more LDPC decode on a frame that failed.  MERCURY_PROFILE_TRACK=1 overrides
+; it.
+rx_profile_track = false
+
 ; TX keying delay in milliseconds (default: 10), waited after PTT ON before
 ; audio is written to the playback device on TX. The default covers the
 ; local radio relay's switch time. Increase this if your host app drives

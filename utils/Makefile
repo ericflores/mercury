@@ -26,7 +26,7 @@ ifeq ($(OS),Windows_NT)
 LDFLAGS += -lws2_32
 endif
 
- OUT = broadcast_test broadcast_diag_tx broadcast_diag_rx watterson_test acquire_vs_decode acq_tuning_sweep qam16_papr_sweep resync_gap_probe burst_train_probe
+ OUT = broadcast_test broadcast_diag_tx broadcast_diag_rx watterson_test acquire_vs_decode rx_bench acq_tuning_sweep qam16_papr_sweep resync_gap_probe burst_train_probe
 
 # CPU-cost instruments.  Linux/macOS only: they time with
 # clock_gettime(CLOCK_PROCESS_CPUTIME_ID), which mingw-w64 does not provide
@@ -75,6 +75,10 @@ run: broadcast_test
 # failures from decode failures.  chanutil puts it on the project's own
 # Watterson channel so its numbers are comparable with other instruments'.
 acquire_vs_decode: acquire_vs_decode.c bench_common.c chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
+
+# Several receiver variants on the same samples (docs/improvements/00-bench.md).
+rx_bench: rx_bench.c bench_common.c chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/freedv/libfreedvdata.a
 	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
 
 # Sweeps the acquisition knobs (timing_mx_thresh, bad_uw_errors) around the

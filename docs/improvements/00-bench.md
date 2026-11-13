@@ -44,7 +44,60 @@ the burst's measured power so tables can say "−3 dB relative to the signal".
 A fixed number of RNG draws per sample, whether or not an impulse is active,
 so variants and rows stay paired.
 
+### 1b. Power-inverter noise (requested by the fork owner)
+
+Cheap solar and battery inverters, and the switching supplies around them,
+are now the commonest man-made noise in residential areas and RV/trailer
+parks. It is not one kind of noise but a mixture, and each part is answered
+by a different proposal, so the bench must be able to produce the parts
+separately and together:
+
+| component | what it looks like in a 2.4 kHz receive passband | answered by |
+|---|---|---|
+| switching harmonics | one or more carriers, drifting slowly (a few Hz per minute, faster while the load changes) and wobbling by a few Hz | 07 (per-carrier weights, notch) |
+| mains modulation | each carrier amplitude-modulated at twice the mains frequency (100 or 120 Hz), so it has sidebands at multiples of that | 07 |
+| commutation buzz | broadband noise gated at 100/120 Hz, duty 10-50 %: the "buzz" of modified-sine inverters | 08 (periodic blanking), 07 (per-frame weights) |
+| dithered switching | a hump of raised noise a few hundred Hz wide instead of a clean carrier (spread-spectrum PWM) | 07 |
+| several units | two or more of the above with slightly different frequencies, beating | all of them at once |
+
+```c
+typedef struct {
+    int    n_carriers;        /* 0..4 */
+    double carrier_hz[4];     /* audio frequency of each harmonic */
+    double carrier_db[4];     /* level relative to the signal */
+    double drift_hz_per_s;    /* slow linear drift */
+    double wobble_hz;         /* peak random-walk deviation */
+    double mains_hz;          /* 50 or 60; modulation is at twice this */
+    double am_depth;          /* 0..1 amplitude modulation of the carriers */
+    double buzz_db;           /* gated broadband noise, relative to the signal's rms; <= -90 = none */
+    double buzz_duty;         /* fraction of each half mains cycle */
+    double hump_hz, hump_width_hz, hump_db;   /* dithered-switching noise hump */
+} inverter_profile_t;
+
+void impair_inverter(int16_t *x, int n, double fs, const inverter_profile_t *p, bench_rng *rng);
+const inverter_profile_t *impair_inverter_preset(const char *name);
+```
+
+Presets to start with (names are ours; the parameters are educated guesses
+until calibrated): `inv-buzz` (modified sine: buzz only, 30 % duty),
+`inv-carrier` (one PWM harmonic with 120 Hz modulation and drift),
+`inv-comb` (three harmonics 400-700 Hz apart), `inv-dither` (hump only),
+`inv-mix` (two units: `inv-buzz` at 60 Hz plus `inv-carrier`),
+`powerline` (the older case: narrow impulses at 100/120 Hz).
+`rx_bench --inverter NAME[,DB]` adds one; the option may be repeated to mix.
+
+**These are synthetic models, not measurements.** Before any claim that a
+mitigation "removes inverter noise", record the real thing with
+`MERCURY_RX_DUMP` near actual inverters (several makes, idle and loaded),
+replay it with `rx_replay`, and tune the presets until the bench reproduces
+what the recordings do to each mode. Keep the recordings' provenance in the
+findings document.
+
 ### 2. `utils/rx_bench.c` — the multi-variant sweep
+
+A first stage exists (`utils/rx_bench.c`, added with proposal 09): AWGN or a
+Watterson preset, a tone, random impulses, and the channel-estimate variants
+`stock,t4,t4f3,t4f5`. The rest of this section is what it should grow into.
 
 Usage (keep it close to `acquire_vs_decode`):
 

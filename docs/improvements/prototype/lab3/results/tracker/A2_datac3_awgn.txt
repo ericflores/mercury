@@ -1,0 +1,4 @@
+DATAC3 128 B, burst 3.41 s, chan AWGN, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+SNR3k    meas            stock          tpa   (acquired/delivered per 100)
+   -4.5    -4.50      71/12        71/9       any  12
+   -4.0    -4.00      97/76        97/71      any  82

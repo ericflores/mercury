@@ -128,3 +128,10 @@ it as a late frame, not as a timing anchor.
   than stock's.
 - Delivered frames at −13 dB (DATAC16, with 09 and 19 on) at least doubled.
 - No loss of delivered frames at any SNR on any preset.
+
+## Prior art
+
+modem73 acquires in the middle of a frame from its pilot rows, matched
+differentially against the pilot row one period earlier, and rescues frames
+backwards from the end marker (`MODEM73-NOTES.md`). That is this proposal's
+stage 2 metric in a fielded modem.

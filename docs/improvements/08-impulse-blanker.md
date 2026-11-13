@@ -132,3 +132,6 @@ for spec 10.
   and replay them (`rx_replay`) before claiming a field benefit.
 - With a narrow receive filter (BW500 stations) impulses are stretched to
   2 ms or more; `hold_len` may need to follow the session bandwidth.
+- modem73 ships a blanker of this kind on by default (`MODEM73-NOTES.md`):
+  scale a sample down above 6× a tracked envelope, zero it above 8×. Put
+  those thresholds on the bench as one of the variants.

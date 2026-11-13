@@ -156,3 +156,8 @@ Later phases, each its own change:
   interfered. Fall back to the minimum quartile and report.
 - Residuals from only `np` pilot rows are noisy for short packets (DATAC0 has
   `np = 4`); require `nv_n >= 8` before weighting.
+- modem73 retries a failed decode with its weakest rows erased
+  (`MODEM73-NOTES.md`). Here the soft bits already fall with the square of
+  the estimated amplitude, so the expected gain is small; add it as one more
+  variant of this attempt (erase the cells under 0.3× the median amplitude)
+  and let the bench decide.

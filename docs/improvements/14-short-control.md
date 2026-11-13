@@ -113,3 +113,11 @@ round: 37.3 s → 34.7 s (+7.5 % throughput). One DATAC1 frame per round:
 - Capability absent or switch off: identical to trunk.
 - Sim: clean and high-SNR fading channels faster; no channel more than 1 %
   slower; zero collisions; integrity 100 %.
+
+## A code candidate from modem73
+
+modem73 sends 32 bytes in 0.54 s on a (1024,288) polar code with list
+decoding (`MODEM73-NOTES.md`). Before fixing the short frame's code, bench a
+CRC-aided polar code (N = 512 or 1024, list 8-32) against the short LDPC
+code decoded with proposal 12's ordered-statistics decoder, at equal payload
+and airtime. Short blocks are where list decoding earns its cost.

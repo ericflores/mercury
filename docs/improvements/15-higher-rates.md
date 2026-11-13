@@ -127,3 +127,7 @@ both ends configured that bandwidth.
 - Real transmitters (ALC, audio chain, IMD) may cap usable SNR below what
   these rungs need. The peer-distortion indicator of spec 10 is the tool to
   see that on air.
+- Reference points from another modem (its own table, not measured here;
+  `MODEM73-NOTES.md`): 64-QAM 3/4 at 19 dB, 256-QAM 3/4 at 24 dB. Its guide
+  recommends staying under 8-PSK on HF and keeps the dense modes for FM
+  links, which is proposal 25's ground.

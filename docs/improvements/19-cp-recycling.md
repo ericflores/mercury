@@ -114,3 +114,9 @@ API: `freedv_set_cp_recycle(f, guard_samples)`; backend hook or the same
   DATAC1, DATAC3 and DATAC17, at least 0.3 dB for QAM16C2.
 - False accepts: zero in 1000 noise-only windows per mode.
 - Decode-time budget respected on the target machine (proposal 23).
+
+## Later: an adaptive guard
+
+Proposal 26 measures the delay profile on the pilot rows. The clean part of
+the prefix is then known (from the last path's prefix start to the first
+path's useful start) and can replace the fixed guard of this proposal.

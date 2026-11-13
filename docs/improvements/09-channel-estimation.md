@@ -193,3 +193,8 @@ noise-only control.
   the same list.
 - Side observation to raise with maintainers, not to fix here:
   `ofdm.c:2112` overwrites the `amp_est_mode` amplitude.
+- Measured later (proposal 26, prototype section): giving each data row its
+  own estimate by interpolating between pilot rows (linear, Catmull-Rom, or
+  the four-pilot weights with a time slope) changes nothing on CCIR Poor or
+  NVIS at 1 Hz Doppler. And on NVIS the limit is the FFT window and the
+  timing tracker, not the estimate: see `26-window-placement.md`.

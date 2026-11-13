@@ -20,6 +20,8 @@ unchanged, no cell of any table below shows a frame lost.
 
 **It does nothing on disturbed NVIS** (7 ms delay spread). That channel is
 limited by multipath, not by noise in the reference, and the tables say so.
+(Found later: by where the FFT window sits and by the timing tracker
+losing the burst; `docs/improvements/26-window-placement.md`.)
 
 ## What changed
 

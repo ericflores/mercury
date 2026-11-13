@@ -17,24 +17,27 @@ first.
 | 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`); impairment library, inverter presets, replay to do |
 | 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | implemented behind `MERCURY_CHANEST`, bench findings in `docs/CHANNEL-ESTIMATION-FINDINGS.md`; ini key, false-accept controls, offset runs, Pi timing, integration A/B to do |
 | 2 | [19-cp-recycling.md](19-cp-recycling.md) | #19 | receiver only | 09 | implemented behind `MERCURY_CP_RECYCLE`, bench findings in `docs/CP-RECYCLING-FINDINGS.md`; guard/margin sweep, offset runs, false-accept controls, Pi timing to do |
-| 3 | [23-rx-effort.md](23-rx-effort.md) | #23 | receiver only | nothing; gates 09 as a default and every later fallback attempt | cost of a failed decode measured on x86; Pi not measured |
-| 4 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
-| 5 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |
-| 6 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | evidence in tree |
-| 7 | [20-decision-directed.md](20-decision-directed.md) | #20 | receiver only | 09, 19, 23 | ceiling measured with a genie (1-2 dB; 2-3× frames on NVIS) |
-| 8 | [03-directed-acquisition.md](03-directed-acquisition.md) | #3 | receiver only | 00 | not measured |
-| 9 | [21-full-frame-acquisition.md](21-full-frame-acquisition.md) | #21 | receiver only | 00; complements 03 | arithmetic only |
-| 10 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | not measured |
-| 11 | [06-mfsk-metrics.md](06-mfsk-metrics.md) | #6 | receiver only | 00 | not measured |
-| 12 | [05-apriori-redecode.md](05-apriori-redecode.md) | #5 | receiver only | 09 (fallback path) | not measured |
-| 13 | [12-osd.md](12-osd.md) | #12 | receiver only | nothing | not measured |
-| 14 | [11-diversity.md](11-diversity.md) | #11 | receiver only, needs hardware | nothing | not measured |
-| 15 | [22-neural-receiver.md](22-neural-receiver.md) | #22 | research (GPU for training) | 00, 20 as the baseline to beat | not started; yardsticks measured |
-| 16 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream |
-| 17 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
-| 18 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
-| 19 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
-| 20 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
+| 3 | [26-window-placement.md](26-window-placement.md) | #26 | receiver only | 09, 19 (the attempt list), 23 | prototype measured: on disturbed NVIS (7 ms) DATAC1 12 → 58 of 60 frames at +7.8 dB, DATAC3 27 → 57; neutral on white noise and CCIR Poor |
+| 4 | [23-rx-effort.md](23-rx-effort.md) | #23 | receiver only | nothing; gates 09 as a default and every later fallback attempt | cost of a failed decode measured on x86; Pi not measured |
+| 5 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
+| 6 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |
+| 7 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | evidence in tree |
+| 8 | [20-decision-directed.md](20-decision-directed.md) | #20 | receiver only | 09, 19, 23 | ceiling measured with a genie (1-2 dB; 2-3× frames on NVIS) |
+| 9 | [03-directed-acquisition.md](03-directed-acquisition.md) | #3 | receiver only | 00 | not measured |
+| 10 | [21-full-frame-acquisition.md](21-full-frame-acquisition.md) | #21 | receiver only | 00; complements 03 | arithmetic only |
+| 11 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | not measured |
+| 12 | [06-mfsk-metrics.md](06-mfsk-metrics.md) | #6 | receiver only | 00 | not measured |
+| 13 | [05-apriori-redecode.md](05-apriori-redecode.md) | #5 | receiver only | 09 (fallback path) | not measured |
+| 14 | [12-osd.md](12-osd.md) | #12 | receiver only | nothing | not measured |
+| 15 | [11-diversity.md](11-diversity.md) | #11 | receiver only, needs hardware | nothing | not measured |
+| 16 | [22-neural-receiver.md](22-neural-receiver.md) | #22 | research (GPU for training) | 00, 20 as the baseline to beat | not started; yardsticks measured |
+| 17 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream |
+| 18 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
+| 19 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
+| 20 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
+| 21 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
+| 22 | [24-qsy.md](24-qsy.md) | #24 | wire change, radio control | capability negotiation, busy detector, 10 | design only |
+| 23 | [25-vhf-uhf.md](25-vhf-uhf.md) | #25 | new modes and link timings | 00 (FM channel model), 15, 23 | design only |
 
 Update the status column and tick the task list in the issue as work lands.
 
@@ -44,6 +47,10 @@ decode costs, what was tried and did **not** work (more decoder iterations,
 ensembles of decodes, salvaging pieces of failed frames), and where neural
 networks do and do not apply. Read it before proposing anything that spends
 more compute.
+
+[MODEM73-NOTES.md](MODEM73-NOTES.md) goes through another open modem
+technique by technique and says which proposal each maps to; one of its
+ideas led to proposal 26.
 
 ## The four rules
 
@@ -284,6 +291,17 @@ These cost time during the prototype; do not repeat them.
 12. **A decode that fails is the expensive case**: all 100 iterations, about
     0.2 s of a server core for the 16200-bit code, against an allowance of
     about 1 s. Every fallback attempt is another one. See proposal 23.
+13. **A delivery rate that does not rise with SNR is not a noise problem.**
+    DATAC1 on disturbed NVIS delivers 20-30 % at +8 dB and at +18 dB alike.
+    A better estimate (09) and a better decoder do nothing there; the FFT
+    window and the timing tracker were the limit (proposal 26). Sweep the
+    SNR well above the cliff before deciding what a channel is limited by.
+14. **Two receivers with different FFT windows are not exactly paired.**
+    Each sees a different stretch of every symbol, so on white noise at a
+    cliff they can differ by several frames in a hundred with nothing wrong.
+    A forced window 4 samples from stock's lost 70 frames in 200 at DATAC1's
+    cliff for a different reason again: it followed every wobble of the
+    timing estimate, which stock's wide hysteresis ignores.
 
 ## Glossary
 

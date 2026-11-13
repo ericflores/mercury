@@ -196,6 +196,7 @@ int mercury_engine_init(const mercury_config *cfg,
     modem_set_tx_gain(powf(10.0f, cfg->tx_gain_db / 20.0f));
     modem_set_tx_delay_ms(cfg->tx_delay_ms);
     modem_freedv_set_chanest(cfg->rx_chanest);
+    modem_freedv_set_cp_recycle(cfg->rx_cp_recycle);
     modem_set_busy_cfg((float)cfg->busy_threshold_db,
                        (float)cfg->busy_hysteresis_db,
                        (uint32_t)cfg->busy_on_debounce_ms,

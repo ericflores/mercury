@@ -157,6 +157,18 @@ tx_gain_db = 0.0
 ; (docs/CHANNEL-ESTIMATION-FINDINGS.md).  Not yet tried on the air.
 rx_chanest = off
 
+; One more decode attempt for OFDM frames that every other attempt failed,
+; from the signal with the cyclic prefix put to use: each prefix sample is
+; averaged with its copy one symbol length away, which lowers the noise in
+; every carrier (issue #19).  Receiver only: it works with any peer.  The
+; value is the guard in samples (8000 per second) at the start of the prefix
+; that is left out because it may hold echoes of the previous symbol: 0 off
+; (default), 4 for a clean channel, 20 for a spread one; at most 48.  On the
+; bench it is worth about half a dB beyond rx_chanest on a noise-limited
+; channel (docs/CP-RECYCLING-FINDINGS.md).  Bench-measured only; not yet tried
+; on the air.  MERCURY_CP_RECYCLE=<samples> overrides it.
+rx_cp_recycle = 0
+
 ; TX keying delay in milliseconds (default: 10), waited after PTT ON before
 ; audio is written to the playback device on TX. The default covers the
 ; local radio relay's switch time. Increase this if your host app drives

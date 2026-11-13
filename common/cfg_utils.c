@@ -67,6 +67,7 @@ void cfg_set_defaults(mercury_config *cfg)
     cfg->tnc_buffer_report_ms = 1000;
     cfg->tx_gain_db            = 0.0f;
     cfg->rx_chanest            = 0;
+    cfg->rx_cp_recycle         = 0;
     cfg->tx_delay_ms           = 10;
     cfg->retry_stagger_ms            = ARQ_RETRY_STAGGER_MS_DEFAULT;
     cfg->silence_fallback_s          = ARQ_SILENCE_FALLBACK_S_DEFAULT;
@@ -468,6 +469,9 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
         cfg->rx_chanest = !strcmp(s, "auto") ? -1 : !strcmp(s, "t4")   ? 1
                         : !strcmp(s, "t4f3") ? 2  : !strcmp(s, "t4f5") ? 3 : 0;
 
+    i = iniparser_getint(ini, CFG_KEY_RX_CP_RECYCLE, cfg->rx_cp_recycle);
+    if (i >= 0 && i <= 48) cfg->rx_cp_recycle = i;
+
     i = iniparser_getint(ini, CFG_KEY_TX_DELAY_MS, cfg->tx_delay_ms);
     if (i >= 0 && i <= 2000) cfg->tx_delay_ms = i;
 
@@ -613,6 +617,7 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
     fprintf(f, "tx_delay_ms = %d\n", cfg->tx_delay_ms);
     fprintf(f, "rx_chanest = %s\n", cfg->rx_chanest == -1 ? "auto" : cfg->rx_chanest == 1 ? "t4"
                                     : cfg->rx_chanest == 2 ? "t4f3" : cfg->rx_chanest == 3 ? "t4f5" : "off");
+    fprintf(f, "rx_cp_recycle = %d\n", cfg->rx_cp_recycle);
 
     fprintf(f, "\n[tnc]\n");
     fprintf(f, "keepalive_s = %d\n", cfg->tnc_keepalive_s);

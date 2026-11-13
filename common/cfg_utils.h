@@ -70,6 +70,7 @@
 #define CFG_KEY_TX_GAIN_DB          "audio:tx_gain_db"
 #define CFG_KEY_TX_DELAY_MS         "audio:tx_delay_ms"
 #define CFG_KEY_RX_CHANEST          "audio:rx_chanest"
+#define CFG_KEY_RX_CP_RECYCLE       "audio:rx_cp_recycle"
 #define CFG_KEY_TNC_KEEPALIVE_S     "tnc:keepalive_s"
 #define CFG_KEY_TNC_BUFFER_REPORT_MS "tnc:buffer_report_ms"
 #define CFG_KEY_ARQ_RETRY_STAGGER_MS          "arq:retry_stagger_ms"
@@ -141,6 +142,10 @@ typedef struct {
                                     * 0 off (default), 1 t4, 2 t4f3, 3 t4f5,
                                     * -1 auto (by mode).  The ini value is
                                     * the name: off, t4, t4f3, t4f5, auto. */
+    int      rx_cp_recycle;         /* One more decode attempt from rows whose
+                                    * cyclic-prefix samples are averaged with
+                                    * their twins (issue #19): the guard in
+                                    * samples, 0 off (default), else 1..48. */
     float    tx_gain_db;            /* Linear-equivalent gain on the modulator
                                     * TX samples, in dB. 0.0 = no change.
                                     * Range -20.0 .. +20.0 (clamped). */

@@ -205,6 +205,49 @@ second time from the samples the receiver still holds:
 3. Collect the corrected symbols and amplitudes of the `np` frames and hand
    them to `decode_packet_from_syms()` (it exists since proposal 19), behind
    the same parity gate and CRC. `freedv_get_rx_decode_path()` returns 4.
+   The attempt decodes from the `t4` estimate (time only) of the replayed
+   rows whatever `rx_chanest` is set to: in the prototype the union of all
+   variants equalled that column in every row.
+
+Facts the replay has to respect (checked in the code, 2026-11-13):
+
+- **Where.** `freedv_comp_short_rx_ofdm()` (`freedv_700.c`) demodulates the
+  frame, then, when `ofdm->modem_frame == np - 1`, runs the decode attempts,
+  and only **after** that calls `ofdm_sync_state_machine()`, which at the
+  end of a burst zeroes the whole `rxbuf`. So the replay runs with the other
+  attempts, while the samples are still there; later is too late.
+- **Finding the first frame again.** Samples enter by shifting `rxbuf` left
+  by `nin` (four places: `ofdm_demod`, `ofdm_demod_shorts`,
+  `ofdm_sync_search`, `ofdm_sync_search_shorts`). Keep a running count of
+  samples shifted in. On the first frame record
+  `count − nrxbuf + rxbufst`; at replay time that frame is at
+  `recorded − (count − nrxbuf)`. This also covers a burst acquired on its
+  postamble (`rxbufst` rewound, `nin = 0`). If the result is negative the
+  frame has left the buffer: no replay.
+- **The down-conversion's phase reference is the buffer index**
+  (`work[k] = rxbuf[j] * cmplxconj(woff_est * j)`), so a replayed frame has
+  a different common phase than when it was first demodulated. The pilots
+  remove it, but only to within rounding: a replay with the stock tracker
+  reproduces the stock symbols to about one part in 10^4, not bit for bit.
+- **The receive band-pass** (`rx_bpf_en`, narrow modes only) filters new
+  samples in place as they arrive. A replay must not filter again.
+- **The end of the burst may not be in the buffer yet.** When the stock
+  tracker has walked its grid forwards, it declares the packet complete
+  before the last symbols have arrived (the trace in the prototype's README
+  ends 1.5 symbols early). A replayed frame whose rows (this pilot, the
+  data rows, the next pilot) would read past the end of `rxbuf` is erased
+  whole: amplitudes zero, so its soft bits are zero. The future pilot row
+  is optional, as on a last frame. One frame in 38 is 2.6 % of the
+  codeword.
+- **Soft-bit scale.** `symbols_to_llrs()` takes `mean_amp`; give it the
+  replay chain's own, not the live demodulator's (pitfall 3).
+- **First and last frame.** The estimator and the tracker test
+  `sync_state == trial && sync_counter == 0` and
+  `sync_state == synced && modem_frame == np - 1`. In a replay those fields
+  belong to the loop; put the two tests behind small functions that a
+  replay can answer for itself.
+- **State.** The tracker's tracks and window live in `struct OFDM`, not in
+  statics as in the prototype: several instances run in different threads.
 
 Cost on a failed burst: `np · (ns + 3 + 4)` FFTs, the path search (3 × 128
 lags × 4 rows × `nc` multiply-adds per frame with the table) and one LDPC
@@ -248,8 +291,9 @@ burst (then the replay would reproduce the stock rows).
    for 10 frames, noise only).
 2. Save and restore of the demodulator's starting state; the replay loop on
    a scratch copy; check first that a replay with the tracker **disabled**
-   reproduces the stock symbols of a clean burst bit for bit. That test
-   proves the rewind arithmetic before any new behaviour depends on it.
+   (stock timing) reproduces the stock symbols of a clean burst to within
+   rounding. That test proves the rewind arithmetic before any new
+   behaviour depends on it.
 3. The attempt in `freedv_700.c`, the switch, `rx_bench` token `pt`.
 4. Unit test `tests/modem/test_ofdm_profile.c` (below).
 5. Bench, 100 trials a cell: DATAC3, DATAC1, DATAC17, QAM16C2 on
@@ -268,7 +312,11 @@ burst (then the replay would reproduce the stock rows).
 ## Tests
 
 - Off: decoded bytes and status sequence identical to trunk.
-- Replay with the tracker disabled equals the stock symbols (step 2).
+- Replay with the tracker disabled equals the stock symbols to within
+  rounding (step 2).
+- The live demodulator is untouched by a replay: its tracking fields and
+  the stock, 09 and 19 symbol buffers are identical, call by call, to a
+  receiver with the feature off.
 - A synthetic two-path burst (the second path a copy delayed 7 ms, equal
   power, no fading, +10 dB) fails with stock and decodes with the feature;
   the same with the paths' powers alternating every 0.5 s.

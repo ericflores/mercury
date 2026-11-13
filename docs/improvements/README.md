@@ -16,7 +16,7 @@ first.
 |---|---|---|---|---|---|
 | 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`); impairment library, inverter presets, replay to do |
 | 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | implemented behind `MERCURY_CHANEST`, bench findings in `docs/CHANNEL-ESTIMATION-FINDINGS.md`; ini key, false-accept controls, offset runs, Pi timing, integration A/B to do |
-| 2 | [19-cp-recycling.md](19-cp-recycling.md) | #19 | receiver only | 09 | prototype measured (0.5-0.8 dB beyond 09) |
+| 2 | [19-cp-recycling.md](19-cp-recycling.md) | #19 | receiver only | 09 | implemented behind `MERCURY_CP_RECYCLE`, bench findings in `docs/CP-RECYCLING-FINDINGS.md`; guard/margin sweep, offset runs, false-accept controls, Pi timing to do |
 | 3 | [23-rx-effort.md](23-rx-effort.md) | #23 | receiver only | nothing; gates 09 as a default and every later fallback attempt | cost of a failed decode measured on x86; Pi not measured |
 | 4 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
 | 5 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |

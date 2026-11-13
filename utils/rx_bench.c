@@ -9,9 +9,18 @@
  *
  *   chan      awgn (lo/hi are SNR3k in dB) or a watterson preset name (lo/hi
  *             are the noise density No; the achieved SNR3k is printed)
- *   variants  comma list, default "stock": stock, t4, t4f3, t4f5 -- the
- *             alternative channel estimate used as the second decode attempt
- *             (freedv_set_chanest_alt, docs/improvements/09)
+ *   variants  comma list, default "stock".  Each variant is a set of EXACT
+ *             tokens joined with '+' (a substring match once made "it400"
+ *             also switch on "t4": handbook pitfall 11); an unknown token is
+ *             an error.  Tokens:
+ *               stock  nothing extra (the plain receiver)
+ *               t4 t4f3 t4f5  the alternative channel estimate as the second
+ *                      decode attempt (freedv_set_chanest_alt, proposal 09)
+ *               cpN    cyclic-prefix recycling with a guard of N samples as
+ *                      one more attempt after the others (proposal 19); with
+ *                      no t4* token it uses t4f3, or t4 on modes of fewer
+ *                      than 9 carriers
+ *             e.g. stock,t4f5,t4f5+cp4,t4f5+cp20
  *   tone      an unmodulated carrier at tone_hz, tone_db relative to the
  *             burst's total power
  *   imp       imp_rate noise bursts per second, 2 ms each, imp_db above the
@@ -42,7 +51,48 @@ static bench_rng rng = {1357911131517ULL};
 static double gauss(void) { return bench_rng_gauss(&rng); }
 static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
 
-typedef struct { int chanest; char name[32]; } variant_t;
+typedef struct { int chanest; int cp; char name[64]; } variant_t;
+
+/* Parse one variant: '+'-joined exact tokens.  0 on success. */
+static int parse_variant(const char *s, variant_t *v) {
+  char tmp[64];
+  int have_est = 0, have_cp = 0, have_stock = 0;
+  if (strlen(s) >= sizeof(tmp) || !*s) return -1;
+  strcpy(tmp, s);
+  strcpy(v->name, s);
+  v->chanest = OFDM_CHANEST_OFF;
+  v->cp = 0;
+  char *save = NULL;
+  for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
+    int est = -1;
+    if (!strcmp(t, "stock")) { have_stock = 1; continue; }
+    else if (!strcmp(t, "t4")) est = OFDM_CHANEST_T4;
+    else if (!strcmp(t, "t4f3")) est = OFDM_CHANEST_T4F3;
+    else if (!strcmp(t, "t4f5")) est = OFDM_CHANEST_T4F5;
+    if (est >= 0) {
+      if (have_est) { fprintf(stderr, "variant '%s': two estimator tokens\n", s); return -1; }
+      have_est = 1;
+      v->chanest = est;
+      continue;
+    }
+    if (t[0] == 'c' && t[1] == 'p' && t[2] >= '0' && t[2] <= '9') {
+      char *end;
+      long n = strtol(t + 2, &end, 10);
+      if (*end || n < 1 || n > 1000) { fprintf(stderr, "variant '%s': bad guard in '%s'\n", s, t); return -1; }
+      if (have_cp) { fprintf(stderr, "variant '%s': two cp tokens\n", s); return -1; }
+      have_cp = 1;
+      v->cp = (int)n;
+      continue;
+    }
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN\n", t, s);
+    return -1;
+  }
+  if (have_stock && (have_est || have_cp)) {
+    fprintf(stderr, "variant '%s': 'stock' cannot be combined\n", s);
+    return -1;
+  }
+  return 0;
+}
 
 int main(int argc, char **argv) {
   if (argc < 7) {
@@ -65,12 +115,7 @@ int main(int argc, char **argv) {
   char tmp[256];
   strncpy(tmp, vlist, sizeof(tmp) - 1); tmp[sizeof(tmp) - 1] = 0;
   for (char *t = strtok(tmp, ","); t && nv < 16; t = strtok(NULL, ",")) {
-    strncpy(v[nv].name, t, 31); v[nv].name[31] = 0;
-    if (!strcmp(t, "stock")) v[nv].chanest = OFDM_CHANEST_OFF;
-    else if (!strcmp(t, "t4")) v[nv].chanest = OFDM_CHANEST_T4;
-    else if (!strcmp(t, "t4f3")) v[nv].chanest = OFDM_CHANEST_T4F3;
-    else if (!strcmp(t, "t4f5")) v[nv].chanest = OFDM_CHANEST_T4F5;
-    else { fprintf(stderr, "unknown variant '%s': stock, t4, t4f3, t4f5\n", t); return 1; }
+    if (parse_variant(t, &v[nv])) return 1;
     nv++;
   }
 
@@ -80,6 +125,11 @@ int main(int argc, char **argv) {
     rx[k] = freedv_open(mode);
     freedv_set_frames_per_burst(rx[k], 1);
     freedv_set_chanest_alt(rx[k], v[k].chanest);
+    freedv_set_cp_recycle(rx[k], v[k].cp);
+    if (freedv_get_cp_recycle(rx[k]) != v[k].cp) {
+      fprintf(stderr, "variant '%s': guard %d is longer than the %s prefix\n", v[k].name, v[k].cp, argv[1]);
+      return 1;
+    }
   }
   freedv_set_frames_per_burst(tx, 1);
 

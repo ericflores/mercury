@@ -89,3 +89,7 @@ LLR scale: average, as the HARQ path does (pitfall 3).
   sound device; radios with dual receivers; two-ADC SDRs. Document a tested
   example in `docs/` once one exists.
 - Acquisition also benefits (two chances per burst) without any extra code.
+- A second receiver is on hand at the owner's station (an SDRplay RSP1B
+  beside the IC-7300; handbook, "Test equipment on hand"). The two are not
+  sample-synchronous and Mercury has no backend for the RSP1B, so a first
+  experiment is offline: record both receivers, align, combine.

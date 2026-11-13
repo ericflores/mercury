@@ -191,7 +191,10 @@ to move to a step its map shows busy answers NAK with an alternative.
    the clean rate; without it, measure what today does.
 6. HL2 wideband occupancy map. Then phase 2: the extended control frame,
    triggers, `specs/qsy`.
-7. CAT band-scope as a map source, if a radio is at hand.
+7. CAT band-scope as a map source. A radio is at hand: the owner's
+   IC-7300 is the one Hamlib's spectrum code was tested on (handbook,
+   "Test equipment on hand"), and an RSP1B receiver can serve as a wider
+   eye while developing.
 8. On air, two stations, an operator at each end: the first test is manual
    (`QSY` command), triggers stay off until the false-trigger rate has been
    measured from dumps.

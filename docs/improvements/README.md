@@ -184,6 +184,36 @@ in `freedv_api.{c,h}`.
   MERCURY_CH_NO=... go test -C tests/integration -run 'TestMercuryARQTransfer$'`;
   two builds with `MERCURY_TEST_BIN_A` / `MERCURY_TEST_BIN_B`).
 
+## Test equipment on hand
+
+The fork owner's station, as stated by the owner on 2026-11-13. None of it
+has been used with Mercury in this programme yet; everything measured so
+far is bench only.
+
+| equipment | what it is | what it allows here | limits |
+|---|---|---|---|
+| Icom IC-7300 | HF and 50 MHz transceiver with a USB audio codec and CAT on one cable (Hamlib model 3073) | the station for every on-air test of the HF proposals. For 24: Hamlib can tune it, and its band-scope over CAT is the one case Hamlib's spectrum code was tested on (Hamlib's own notes), so a coarse occupancy map needs no extra hardware. For 02: clipping and ALC measured on a real transmitter | one transceiver: a two-way session needs a second Mercury station somewhere |
+| SDRplay RSP1B | receive-only SDR, 1 kHz to 2 GHz, up to 10 MHz of spectrum at once | a second, independent receiver. Recordings of local noise (inverters, power lines) and of the IC-7300's own signal for 00-bench, 07, 08 and 22; the second receiver 11 needs; a wideband view of the neighbouring channels for 24 | cannot transmit. Mercury has no backend for it: feed Mercury from an SDR program's audio output, or record and replay |
+| Alinco DJ-MD5FXT | VHF/UHF handheld (DMR and analog FM) | nothing for now | the owner judges it a poor platform to test with; proposal 25 is on hold for that reason |
+
+What one operator can test alone with this:
+
+- **A radio-frequency loop on the bench**: the IC-7300 into a dummy load,
+  the RSP1B as the receiver. Real transmitter, real receiver, no
+  ionosphere. Good for transmit-side questions (02) and for checking that
+  a receiver feature survives real hardware.
+- **Real noise with synthetic bursts**: record the local noise with either
+  receiver and add modem bursts to it on the bench (the data recipe of
+  proposal 22, and what 00-bench's replay tool is for). Exact labels, real
+  interference, no second station.
+- **One way over a real path, to be verified before relying on it**:
+  transmit with the IC-7300 and record the signal at a remote public web
+  receiver, then replay the recording through the receiver variants. It
+  needs 00-bench's replay tool, a receiver whose terms allow it, and the
+  usual identification.
+- **Two-way sessions** (anything the carousel does, 24's negotiation) need
+  a second station running Mercury, or the simulators.
+
 ## Wire format constraints (read before any protocol change)
 
 **The POLL has no free bit.** `encode_ctl()` in `datalink_arq/carousel.c:453`

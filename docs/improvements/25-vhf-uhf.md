@@ -24,9 +24,9 @@ And settle, with numbers, what spread spectrum would add.
 
 ## Order of work on this fork
 
-**On hold.** The fork's owner has an FM transceiver but judges it a poor
-platform to test with, and has no transmitter driven with I/Q (said
-2026-11-13). Do not start any part of this proposal, the bench model
+**On hold.** The fork's owner has one VHF/UHF radio, an Alinco DJ-MD5FXT
+handheld, and judges it a poor platform to test with; the SDR on hand
+receives only (said 2026-11-13; handbook, "Test equipment on hand"). Do not start any part of this proposal, the bench model
 included, until the owner says suitable radios are available. The design
 below stays as the record of what was worked out.
 

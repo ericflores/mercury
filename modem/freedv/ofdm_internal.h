@@ -209,6 +209,20 @@ struct OFDM {
   float *rx_amp_alt;
   complex float chanest_slope;
 
+  /* Cyclic-prefix recycling (Mercury, docs/improvements/19): 0 = off, else the
+   * guard in samples at the head of the prefix.  When on, every row the
+   * demodulator transforms is transformed a second time from a copy of its
+   * samples in which each prefix sample is averaged with its twin one symbol
+   * length away (rx_sym_cp, same shape as rx_sym), and the alternative
+   * estimate is run on those rows into rx_np_cp/rx_amp_cp with its own
+   * phase-slope accumulator.  Nothing the stock or the chanest_alt paths use
+   * is written from it. */
+  int cp_recycle;
+  complex float **rx_sym_cp;
+  complex float *rx_np_cp;
+  float *rx_amp_cp;
+  complex float chanest_slope_cp;
+
   uint8_t tx_uw[MAX_UW_BITS];
   int *uw_ind;
   int *uw_ind_sym;

@@ -55,6 +55,27 @@ static int chanest_for_mode(int mode)
     }
 }
 
+/* Cyclic-prefix recycling (docs/improvements/19): one more decode attempt,
+ * after the others, from rows whose prefix samples were averaged with their
+ * twins.  The value is the guard in samples at the head of the prefix; 0 is
+ * off.  OFF unless asked for: audio:rx_cp_recycle in the ini
+ * (modem_freedv_set_cp_recycle(), before the instances are opened) or
+ * MERCURY_CP_RECYCLE=<samples>, which wins when set. */
+static int g_cp_recycle = 0;
+
+void modem_freedv_set_cp_recycle(int guard_samples)
+{
+    g_cp_recycle = guard_samples;
+}
+
+static int cp_recycle_setting(void)
+{
+    const char *e = getenv("MERCURY_CP_RECYCLE");
+    if (!e || !*e)
+        return g_cp_recycle;
+    return atoi(e);
+}
+
 static void *fdv_open(int mode)
 {
     /* FSK_LDPC needs an advanced open (was open_freedv_mode_locked in modem.c).
@@ -67,7 +88,10 @@ static void *fdv_open(int mode)
     }
     struct freedv *f = freedv_open(mode);
     if (f)
+    {
         freedv_set_chanest_alt(f, chanest_for_mode(mode));
+        freedv_set_cp_recycle(f, cp_recycle_setting());
+    }
     return f;
 }
 

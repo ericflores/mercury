@@ -20,4 +20,9 @@ extern const modem_backend_t modem_backend_freedv;
  * MERCURY_CHANEST.  Off by default. */
 void modem_freedv_set_chanest(int mode);
 
+/* Cyclic-prefix recycling for instances opened from now on: the guard in
+ * samples at the head of the prefix, 0 = off (default).  Overridden by
+ * MERCURY_CP_RECYCLE when that is set. */
+void modem_freedv_set_cp_recycle(int guard_samples);
+
 #endif /* MERCURY_MODEM_FREEDV_H */

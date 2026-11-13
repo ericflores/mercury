@@ -201,6 +201,8 @@ void freedv_close(struct freedv *freedv) {
   FREE(freedv->harq_llr);
   FREE(freedv->rx_syms_alt);
   FREE(freedv->rx_amps_alt);
+  FREE(freedv->rx_syms_cp);
+  FREE(freedv->rx_amps_cp);
   if (freedv->codec2) codec2_destroy(freedv->codec2);
 
   if (FDV_MODE_ACTIVE(FREEDV_MODE_1600, freedv->mode)) {
@@ -1732,6 +1734,15 @@ void freedv_set_chanest_alt(struct freedv *f, int mode) {
 
 int freedv_get_chanest_alt(struct freedv *f) {
   return (f != NULL && f->ofdm != NULL) ? ofdm_get_chanest_alt(f->ofdm) : 0;
+}
+
+void freedv_set_cp_recycle(struct freedv *f, int guard_samples) {
+  if (f != NULL && f->ofdm != NULL && f->rx_syms_cp != NULL)
+    ofdm_set_cp_recycle(f->ofdm, guard_samples);
+}
+
+int freedv_get_cp_recycle(struct freedv *f) {
+  return (f != NULL && f->ofdm != NULL) ? ofdm_get_cp_recycle(f->ofdm) : 0;
 }
 
 int freedv_get_rx_decode_path(struct freedv *f) {

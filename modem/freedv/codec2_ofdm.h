@@ -142,6 +142,13 @@ void ofdm_set_tx_clip_config(struct OFDM *, bool clip_en, float gain1,
 #define OFDM_CHANEST_T4F5 3 /* ...and 1-2-3-2-1 across carriers */
 void ofdm_set_chanest_alt(struct OFDM *, int mode);
 int ofdm_get_chanest_alt(struct OFDM *);
+/* Cyclic-prefix recycling: a further alternative-estimate attempt on rows
+ * whose prefix samples were averaged with their twins.  guard_samples is the
+ * number of samples at the head of the prefix left out (they may hold the
+ * previous symbol's echo); 0, negative or longer than the prefix = off.
+ * See docs/improvements/19-cp-recycling.md. */
+void ofdm_set_cp_recycle(struct OFDM *, int guard_samples);
+int ofdm_get_cp_recycle(struct OFDM *);
 void ofdm_set_sync(struct OFDM *, int);
 void ofdm_set_tx_bpf(struct OFDM *, bool);
 void ofdm_set_dpsk(struct OFDM *ofdm, bool val);

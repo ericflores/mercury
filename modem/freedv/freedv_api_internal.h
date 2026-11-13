@@ -220,9 +220,15 @@ struct freedv {
    * (ofdm->chanest_alt): the packet's symbols and amplitudes as that
    * estimate corrected them, kept beside rx_syms/rx_amps.  rx_decode_path
    * says which attempt delivered the last frame: 0 stock, 1 HARQ combine,
-   * 2 alternative estimate. */
+   * 2 alternative estimate, 3 alternative estimate on recycled
+   * prefix samples. */
   COMP *rx_syms_alt;
   float *rx_amps_alt;
+  /* Fourth attempt (docs/improvements/19): the same, from the rows whose
+   * cyclic-prefix samples were averaged with their twins (ofdm->cp_recycle).
+   * rx_decode_path 3 = delivered by it. */
+  COMP *rx_syms_cp;
+  float *rx_amps_cp;
   int rx_decode_path;
   float *harq_llr;
   int harq_llr_nbits;

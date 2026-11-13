@@ -380,6 +380,21 @@ struct OFDM *ofdm_create(const struct OFDM_CONFIG *config) {
   ofdm->chanest_alt = OFDM_CHANEST_OFF;
   ofdm->chanest_slope = 0.0f;
 
+  ofdm->cp_recycle = 0;
+  ofdm->chanest_slope_cp = 0.0f;
+  ofdm->rx_sym_cp = MALLOC(sizeof(complex float *) * (ofdm->ns + 3));
+  assert(ofdm->rx_sym_cp != NULL);
+  for (i = 0; i < (ofdm->ns + 3); i++) {
+    ofdm->rx_sym_cp[i] =
+        (complex float *)CALLOC(ofdm->nc + 2, sizeof(complex float));
+    assert(ofdm->rx_sym_cp[i] != NULL);
+  }
+  ofdm->rx_np_cp =
+      CALLOC(ofdm->rowsperframe * ofdm->nc, sizeof(complex float));
+  assert(ofdm->rx_np_cp != NULL);
+  ofdm->rx_amp_cp = CALLOC(ofdm->rowsperframe * ofdm->nc, sizeof(float));
+  assert(ofdm->rx_amp_cp != NULL);
+
   ofdm->aphase_est_pilot_log =
       MALLOC(sizeof(float) * (ofdm->rowsperframe * ofdm->nc));
   assert(ofdm->aphase_est_pilot_log != NULL);
@@ -662,6 +677,10 @@ void ofdm_destroy(struct OFDM *ofdm) {
   FREE(ofdm->rx_amp);
   FREE(ofdm->rx_np_alt);
   FREE(ofdm->rx_amp_alt);
+  for (i = 0; i < (ofdm->ns + 3); i++) FREE(ofdm->rx_sym_cp[i]);
+  FREE(ofdm->rx_sym_cp);
+  FREE(ofdm->rx_np_cp);
+  FREE(ofdm->rx_amp_cp);
   FREE(ofdm->aphase_est_pilot_log);
   FREE(ofdm->tx_uw_syms);
   FREE(ofdm->uw_ind);
@@ -1798,6 +1817,57 @@ void ofdm_set_chanest_alt(struct OFDM *ofdm, int mode) {
 
 int ofdm_get_chanest_alt(struct OFDM *ofdm) { return ofdm->chanest_alt; }
 
+void ofdm_set_cp_recycle(struct OFDM *ofdm, int guard_samples) {
+  if (guard_samples < 0 || guard_samples > ofdm->ncp) guard_samples = 0;
+  ofdm->cp_recycle = guard_samples;
+}
+
+int ofdm_get_cp_recycle(struct OFDM *ofdm) { return ofdm->cp_recycle; }
+
+/* Cyclic-prefix recycling (docs/improvements/19-cp-recycling.md).  The
+ * prefix is a copy of the symbol's last ncp samples, so transmitted sample t
+ * equals sample t + m for every t inside it.  The FFT window starts `delta`
+ * samples into the prefix; it holds
+ *  - on its first ncp - delta samples, prefix samples, whose twins lie just
+ *    after the window (+m), in the symbol's own tail;
+ *  - on its last delta samples, tail samples, whose twins lie just before the
+ *    window (-m), in the first delta samples of the prefix.  The first
+ *    `guard` of those are left out: that is where the previous symbol's
+ *    echoes (delay spread, filter ringing) land.
+ * Averaging a pair halves the noise on that sample and leaves the carriers
+ * orthogonal.  The tail side keeps 2 samples of margin against timing jitter.
+ * `wcp` is a copy of `work`; the stock row is never modified.  The same
+ * down-conversion by the absolute sample index keeps a pair aligned under a
+ * frequency offset. */
+static void ofdm_cp_recycle_row(struct OFDM *ofdm, const complex float *work,
+                                complex float *wcp, int st, float woff_est) {
+  int m = ofdm->m, ncp = ofdm->ncp, k;
+  int delta = ofdm->sample_point - ofdm->timing_est;
+  if (delta < 0) delta = 0;
+  if (delta > ncp) delta = ncp;
+  memcpy(wcp, work, sizeof(complex float) * m);
+  int a = ncp - delta - 2;           /* tail side */
+  int b = delta - ofdm->cp_recycle;  /* head side */
+  for (k = 0; k < a; k++) {
+    int j = st + k + m;
+    if (j < 0 || j >= ofdm->nrxbuf) break;
+    wcp[k] = 0.5f * (wcp[k] + ofdm->rxbuf[j] * cmplxconj(woff_est * j));
+  }
+  for (k = (m - b > 0 ? m - b : 0); k < m; k++) {
+    int j = st + k - m;
+    if (j < 0 || j >= ofdm->nrxbuf) continue;
+    wcp[k] = 0.5f * (wcp[k] + ofdm->rxbuf[j] * cmplxconj(woff_est * j));
+  }
+}
+
+/* The estimator for the recycled rows: the instance's own alternative
+ * estimate when that is on, else the per-mode choice of rx_chanest=auto
+ * (smoothing across carriers needs enough of them). */
+static int ofdm_cp_est_mode(struct OFDM *ofdm) {
+  if (ofdm->chanest_alt) return ofdm->chanest_alt;
+  return ofdm->nc >= 9 ? OFDM_CHANEST_T4F3 : OFDM_CHANEST_T4;
+}
+
 /* The alternative estimate: per carrier, the four pilot rows the demodulator
  * already holds (previous, this, next, future) weighted 1,3,3,1, then
  * optionally smoothed across adjacent carriers.
@@ -1811,7 +1881,9 @@ int ofdm_get_chanest_alt(struct OFDM *ofdm) { return ofdm->chanest_alt; }
  *    neighbours without undoing that slope delivered 0/20 DATAC1 frames at
  *    +5 dB (docs/improvements/prototype), so the common slope is tracked
  *    over the burst and removed before smoothing. */
-static void ofdm_chanest_alt(struct OFDM *ofdm, float *aphase, float *aamp) {
+static void ofdm_chanest_alt(struct OFDM *ofdm, complex float **rows,
+                             complex float *slope_acc, int est_mode,
+                             float *aphase, float *aamp) {
   int nc = ofdm->nc;
   complex float g[nc + 2];
   float wp = 1.0f, wt = 3.0f, wn = 3.0f, wf = 1.0f;
@@ -1819,27 +1891,26 @@ static void ofdm_chanest_alt(struct OFDM *ofdm, float *aphase, float *aamp) {
   int last = (ofdm->sync_state == synced && ofdm->modem_frame == ofdm->np - 1);
   if (first) {
     wp = 0.0f;
-    ofdm->chanest_slope = 0.0f;
+    *slope_acc = 0.0f;
   }
   if (last) wf = 0.0f;
 
   for (int i = 1; i <= nc; i++) {
     complex float pc = conjf(ofdm->pilots[i]);
-    g[i] = (wp * ofdm->rx_sym[0][i] + wt * ofdm->rx_sym[1][i] +
-            wn * ofdm->rx_sym[ofdm->ns + 1][i] +
-            wf * ofdm->rx_sym[ofdm->ns + 2][i]) *
+    g[i] = (wp * rows[0][i] + wt * rows[1][i] + wn * rows[ofdm->ns + 1][i] +
+            wf * rows[ofdm->ns + 2][i]) *
            pc / (wp + wt + wn + wf);
   }
 
-  int half = ofdm->chanest_alt == OFDM_CHANEST_T4F3   ? 1
-             : ofdm->chanest_alt == OFDM_CHANEST_T4F5 ? 2
-                                                      : 0;
+  int half = est_mode == OFDM_CHANEST_T4F3   ? 1
+             : est_mode == OFDM_CHANEST_T4F5 ? 2
+                                             : 0;
   float th = 0.0f;
   if (half) {
     complex float sl = 0.0f;
     for (int i = 1; i < nc; i++) sl += g[i + 1] * conjf(g[i]);
-    ofdm->chanest_slope = 0.7f * ofdm->chanest_slope + sl;
-    th = cargf(ofdm->chanest_slope + 1E-12f);
+    *slope_acc = 0.7f * *slope_acc + sl;
+    th = cargf(*slope_acc + 1E-12f);
   }
   static const float w3[3] = {1, 2, 1}, w5[5] = {1, 2, 3, 2, 1};
   const float *wv = half == 1 ? w3 : w5;
@@ -1955,6 +2026,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
   for (i = 0; i < (ofdm->ns + 3); i++) {
     for (j = 0; j < (ofdm->nc + 2); j++) {
       ofdm->rx_sym[i][j] = 0.0f;
+      ofdm->rx_sym_cp[i][j] = 0.0f;
     }
   }
 
@@ -1965,6 +2037,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
   en = st + ofdm->m;
 
   complex float work[ofdm->m];
+  complex float work_cp[ofdm->m]; /* only used when cp_recycle is on */
 
   /* down-convert at current timing instant------------------------------- */
 
@@ -1987,6 +2060,10 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
    *
    */
   dft(ofdm, ofdm->rx_sym[0], work);
+  if (ofdm->cp_recycle) {
+    ofdm_cp_recycle_row(ofdm, work, work_cp, st, woff_est);
+    dft(ofdm, ofdm->rx_sym_cp[0], work_cp);
+  }
 
   /*
    * "This" pilot comes after the extra symbol allotted at the top, and after
@@ -2038,6 +2115,10 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
      * |                      |  rx_sym[10]
      */
     dft(ofdm, ofdm->rx_sym[rr + 1], work);
+    if (ofdm->cp_recycle) {
+      ofdm_cp_recycle_row(ofdm, work, work_cp, st, woff_est);
+      dft(ofdm, ofdm->rx_sym_cp[rr + 1], work_cp);
+    }
   }
 
   /*
@@ -2069,6 +2150,10 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
    * +----------------------+
    */
   dft(ofdm, ofdm->rx_sym[ofdm->ns + 2], work);
+  if (ofdm->cp_recycle) {
+    ofdm_cp_recycle_row(ofdm, work, work_cp, st, woff_est);
+    dft(ofdm, ofdm->rx_sym_cp[ofdm->ns + 2], work_cp);
+  }
 
   /*
    * We are finished now with the DFT and down conversion
@@ -2195,7 +2280,14 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
 
   float aphase_alt[ofdm->nc + 2];
   float aamp_alt[ofdm->nc + 2];
-  if (ofdm->chanest_alt) ofdm_chanest_alt(ofdm, aphase_alt, aamp_alt);
+  if (ofdm->chanest_alt)
+    ofdm_chanest_alt(ofdm, ofdm->rx_sym, &ofdm->chanest_slope,
+                     ofdm->chanest_alt, aphase_alt, aamp_alt);
+  float aphase_cp[ofdm->nc + 2];
+  float aamp_cp[ofdm->nc + 2];
+  if (ofdm->cp_recycle)
+    ofdm_chanest_alt(ofdm, ofdm->rx_sym_cp, &ofdm->chanest_slope_cp,
+                     ofdm_cp_est_mode(ofdm), aphase_cp, aamp_cp);
 
   /*
    * correct the phase offset using phase estimate, and demodulate
@@ -2247,6 +2339,11 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
         ofdm->rx_np_alt[(rr * ofdm->nc) + (i - 1)] =
             ofdm->rx_sym[rr + 2][i] * cmplxconj(aphase_alt[i]);
         ofdm->rx_amp_alt[(rr * ofdm->nc) + (i - 1)] = aamp_alt[i];
+      }
+      if (ofdm->cp_recycle) {
+        ofdm->rx_np_cp[(rr * ofdm->nc) + (i - 1)] =
+            ofdm->rx_sym_cp[rr + 2][i] * cmplxconj(aphase_cp[i]);
+        ofdm->rx_amp_cp[(rr * ofdm->nc) + (i - 1)] = aamp_cp[i];
       }
 
       /*

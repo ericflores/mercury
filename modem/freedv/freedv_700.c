@@ -249,6 +249,10 @@ void freedv_ofdm_data_open(struct freedv *f, struct freedv_advanced *adv) {
   assert(f->rx_syms_alt != NULL);
   f->rx_amps_alt = (float *)CALLOC(Nsymsperpacket, sizeof(float));
   assert(f->rx_amps_alt != NULL);
+  f->rx_syms_cp = (COMP *)CALLOC(Nsymsperpacket, sizeof(COMP));
+  assert(f->rx_syms_cp != NULL);
+  f->rx_amps_cp = (float *)CALLOC(Nsymsperpacket, sizeof(float));
+  assert(f->rx_amps_cp != NULL);
 
   f->nin = f->nin_prev = ofdm_get_nin(f->ofdm);
   f->n_nat_modem_samples = ofdm_get_samples_per_packet(f->ofdm);
@@ -513,6 +517,40 @@ static float freedv_snr_calib(int mode, float snr_raw) {
   }
 }
 
+/* One more decode attempt from a packet's worth of symbols and amplitudes
+ * (the alternative estimate, docs/improvements/09, or the same on recycled
+ * prefix samples, docs/improvements/19): payload extraction, de-interleave,
+ * LLRs, LDPC.  Returns the CRC class (0 = no frame) of the decoded codeword,
+ * after the same parity gate as the HARQ combine path: these attempts are
+ * reached on purpose at the cliff, where a decode that has not converged
+ * still has its 2^-16 chance at the CRC.  `codeword` must hold the longer of
+ * the code length and the payload bits. */
+static int decode_packet_from_syms(struct freedv *f, complex float *syms,
+                                   float *amps, float EsNo, uint8_t *codeword,
+                                   int *pcc, int *iter) {
+  struct OFDM *ofdm = f->ofdm;
+  struct LDPC *ldpc = f->ldpc;
+  int Nbitsperpacket = ofdm_get_bits_per_packet(ofdm);
+  int Npayloadbitsperpacket = Nbitsperpacket - ofdm->nuwbits - ofdm->ntxtbits;
+  int Npayloadsymsperpacket = Npayloadbitsperpacket / ofdm->bps;
+  COMP p_syms[Npayloadsymsperpacket];
+  float p_amps[Npayloadsymsperpacket];
+  COMP p_syms_de[Npayloadsymsperpacket];
+  float p_amps_de[Npayloadsymsperpacket];
+  short p_txt[f->ofdm_ntxtbits > 0 ? f->ofdm_ntxtbits : 1];
+  float p_llr[Npayloadbitsperpacket];
+  int txt_index = 0;
+  ofdm_disassemble_psk_modem_packet_with_text_amps(ofdm, syms, amps, p_syms,
+                                                   p_amps, p_txt, &txt_index);
+  gp_deinterleave_comp(p_syms_de, p_syms, Npayloadsymsperpacket);
+  gp_deinterleave_float(p_amps_de, p_amps, Npayloadsymsperpacket);
+  symbols_to_llrs(p_llr, p_syms_de, p_amps_de, EsNo, ofdm->mean_amp, ofdm->bps,
+                  Npayloadsymsperpacket);
+  ldpc_decode_frame(ldpc, pcc, iter, codeword, p_llr);
+  if (!ldpc_harq_combine_parity_ok(*pcc, ldpc->NumberParityBits)) return 0;
+  return freedv_crc16_class(f, codeword, ldpc->data_bits_per_frame);
+}
+
 /*
   OFDM demod function that can support complex (float) or real (short)
   samples.  The real short samples are useful for low memory platforms such as
@@ -596,6 +634,18 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
       memcpy(&sa[Nsymsperpacket - Nsymsperframe], ofdm->rx_np_alt,
              sizeof(complex float) * Nsymsperframe);
       memcpy(&f->rx_amps_alt[Nsymsperpacket - Nsymsperframe], ofdm->rx_amp_alt,
+             sizeof(float) * Nsymsperframe);
+    }
+
+    if (ofdm->cp_recycle && f->rx_syms_cp != NULL) {
+      complex float *sc = (complex float *)f->rx_syms_cp;
+      memmove(sc, &sc[Nsymsperframe],
+              sizeof(complex float) * (Nsymsperpacket - Nsymsperframe));
+      memmove(f->rx_amps_cp, &f->rx_amps_cp[Nsymsperframe],
+              sizeof(float) * (Nsymsperpacket - Nsymsperframe));
+      memcpy(&sc[Nsymsperpacket - Nsymsperframe], ofdm->rx_np_cp,
+             sizeof(complex float) * Nsymsperframe);
+      memcpy(&f->rx_amps_cp[Nsymsperpacket - Nsymsperframe], ofdm->rx_amp_cp,
              sizeof(float) * Nsymsperframe);
     }
 
@@ -708,33 +758,40 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
          * this too is reached on purpose at the cliff, where a decode that
          * has not converged still has its 2^-16 chance at the CRC. */
         if (!crc_ok && ofdm->chanest_alt && f->rx_syms_alt != NULL) {
-          COMP alt_syms[Npayloadsymsperpacket];
-          float alt_amps[Npayloadsymsperpacket];
-          COMP alt_syms_de[Npayloadsymsperpacket];
-          float alt_amps_de[Npayloadsymsperpacket];
-          short alt_txt[f->ofdm_ntxtbits > 0 ? f->ofdm_ntxtbits : 1];
-          float llr_alt[Npayloadbitsperpacket];
           uint8_t alt_codeword[codeword_len];
-          int alt_txt_index = 0, alt_pcc = 0, alt_iter = 0;
-          ofdm_disassemble_psk_modem_packet_with_text_amps(
-              ofdm, (complex float *)f->rx_syms_alt, f->rx_amps_alt, alt_syms,
-              alt_amps, alt_txt, &alt_txt_index);
-          gp_deinterleave_comp(alt_syms_de, alt_syms, Npayloadsymsperpacket);
-          gp_deinterleave_float(alt_amps_de, alt_amps, Npayloadsymsperpacket);
-          symbols_to_llrs(llr_alt, alt_syms_de, alt_amps_de, EsNo,
-                          ofdm->mean_amp, ofdm->bps, Npayloadsymsperpacket);
-          ldpc_decode_frame(ldpc, &alt_pcc, &alt_iter, alt_codeword, llr_alt);
-          if (ldpc_harq_combine_parity_ok(alt_pcc, ldpc->NumberParityBits)) {
-            int alt_class =
-                freedv_crc16_class(f, alt_codeword, Ndatabitsperpacket);
-            if (alt_class != 0) {
-              memcpy(f->rx_payload_bits, alt_codeword, Ndatabitsperpacket);
-              crc_class = alt_class;
-              crc_ok = 1;
-              parityCheckCount = alt_pcc;
-              iter = alt_iter;
-              f->rx_decode_path = 2;
-            }
+          int alt_pcc = 0, alt_iter = 0;
+          int alt_class = decode_packet_from_syms(
+              f, (complex float *)f->rx_syms_alt, f->rx_amps_alt, EsNo,
+              alt_codeword, &alt_pcc, &alt_iter);
+          if (alt_class != 0) {
+            memcpy(f->rx_payload_bits, alt_codeword, Ndatabitsperpacket);
+            crc_class = alt_class;
+            crc_ok = 1;
+            parityCheckCount = alt_pcc;
+            iter = alt_iter;
+            f->rx_decode_path = 2;
+          }
+        }
+        /* The same on the recycled rows (docs/improvements/19): the cyclic
+         * prefix's samples averaged with their twins one symbol length
+         * away, so less noise reaches every carrier.  Last, after the
+         * cheaper attempts and only on failure, so it can only add frames:
+         * the prototype, which recycled in the FFT input of every attempt,
+         * lost 2 frames in 100 at one point where the un-recycled attempt
+         * delivered them (COMPUTE-AND-NEURAL-RESEARCH.md, 3.1). */
+        if (!crc_ok && ofdm->cp_recycle && f->rx_syms_cp != NULL) {
+          uint8_t cp_codeword[codeword_len];
+          int cp_pcc = 0, cp_iter = 0;
+          int cp_class = decode_packet_from_syms(
+              f, (complex float *)f->rx_syms_cp, f->rx_amps_cp, EsNo,
+              cp_codeword, &cp_pcc, &cp_iter);
+          if (cp_class != 0) {
+            memcpy(f->rx_payload_bits, cp_codeword, Ndatabitsperpacket);
+            crc_class = cp_class;
+            crc_ok = 1;
+            parityCheckCount = cp_pcc;
+            iter = cp_iter;
+            f->rx_decode_path = 3;
           }
         }
         if (!crc_ok && f->verbose) {

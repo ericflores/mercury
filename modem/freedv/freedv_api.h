@@ -280,9 +280,19 @@ void freedv_set_acq_fft_enable(struct freedv *freedv, bool val);
  * decode fails its CRC is decoded once more from an estimate averaged over
  * more pilots.  The stock decode is untouched, so nothing that decodes
  * today is lost.  freedv_get_rx_decode_path: which attempt delivered the
- * last frame (0 stock, 1 HARQ combine, 2 alternative estimate). */
+ * last frame (0 stock, 1 HARQ combine, 2 alternative estimate, 3 alternative
+ * estimate on recycled cyclic-prefix samples). */
 void freedv_set_chanest_alt(struct freedv *freedv, int mode);
 int freedv_get_chanest_alt(struct freedv *freedv);
+/* Cyclic-prefix recycling for the OFDM data modes: one more decode attempt,
+ * after the others, from rows whose prefix samples were averaged with their
+ * twins one symbol length away.  guard_samples is the length at the head of
+ * the prefix left out as possibly holding echoes of the previous symbol (4
+ * for a clean channel, 20 for a spread one).  0 = off (the default); a
+ * negative value or one longer than the prefix also means off.
+ * docs/improvements/19-cp-recycling.md. */
+void freedv_set_cp_recycle(struct freedv *freedv, int guard_samples);
+int freedv_get_cp_recycle(struct freedv *freedv);
 int freedv_get_rx_decode_path(struct freedv *freedv);
 void freedv_set_timing_mx_thresh(struct freedv *freedv, float val);
 void freedv_set_bad_uw_errors(struct freedv *freedv, int val);

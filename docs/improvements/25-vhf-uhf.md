@@ -22,6 +22,19 @@ Two things, for two kinds of station:
 
 And settle, with numbers, what spread spectrum would add.
 
+## Order of work on this fork
+
+The fork's owner has FM transceivers only, no transmitter driven with I/Q
+(asked 2026-11-13). So:
+
+1. **A and B first** (FM-audio modes and the link timings), then D's FM
+   floor. Everything in them can be measured on the owner's bench with two
+   FM radios, a sound interface each and an attenuator or dummy loads; no
+   second station is needed.
+2. **C stays a design.** Its bench step (C1) is software and can be done at
+   any time, but C2 and C3 need hardware nobody here can test with. Do not
+   start them without a tester who has it.
+
 ## Facts
 
 - The ladder was built for HF. Every OFDM data mode spends 6 ms of each
@@ -31,6 +44,14 @@ And settle, with numbers, what spread spectrum would add.
   (`docs/CAROUSEL-SPEC.md`, 1.3). Its code is rate 0.6.
 - A VHF/UHF line-of-sight path has microseconds of delay spread and, between
   fixed stations, almost no Doppler.
+- **Today's build already runs through an FM radio.** The HF modes occupy
+  about 470-2530 Hz of audio, the PTT backends an FM interface needs exist
+  (`[ptt] method = serial` for RTS/DTR, `cm108` for the GPIO of a USB sound
+  chip; `mercury.ini.example`), and `[audio] tx_delay_ms` (default 10, up to
+  2000) delays the audio after keying, which is where a radio's transmit
+  attack and the far receiver's squelch go. That is a baseline to measure
+  before any new mode exists, and the first way to find what an FM link
+  does to the turn-taking.
 - **Bandwidth a data signal may occupy, United States** (47 CFR §97.307(f);
   read the current text before relying on this, and other countries and
   their band plans differ): 2.8 kHz on HF; 20 kHz on 6 m and 2 m; 100 kHz on
@@ -222,8 +243,10 @@ fading, against wide OFDM.
    RF noise, discriminator, de-emphasis, audio band-pass with its group
    delay), calibrated against two real radios back to back through an
    attenuator, including the threshold.
-2. The existing rungs through it: the baseline, and how much the cyclic
-   prefix and the pilots cost there.
+2. The existing rungs through it, and through the two real radios
+   (`tx_delay_ms` raised, squelch open or tone squelch off): the baseline,
+   how much the cyclic prefix and the pilots cost there, and which of the
+   carousel's timings an FM radio breaks first.
 3. FM-audio mode candidates (A) on the bench; pick a ladder of four or five.
 4. Timings (B) with two radios on dummy loads; the model check.
 5. Integration test with `vhf-fm`; mixed-profile peers must refuse each

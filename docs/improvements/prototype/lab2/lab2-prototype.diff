@@ -1,0 +1,198 @@
+diff --git a/modem/freedv/freedv_700.c b/modem/freedv/freedv_700.c
+index 94c57fd..6f582bd 100644
+--- a/modem/freedv/freedv_700.c
++++ b/modem/freedv/freedv_700.c
+@@ -519,6 +519,22 @@ static float freedv_snr_calib(int mode, float snr_raw) {
+   the SM1000.
+ */
+ 
++/* ---- LAB (scratch) ---- */
++int mx_ens = 0;            /* perturbed re-decodes after a failed stock decode */
++float mx_ens_sigma = 0.3f; /* relative dither */
++int mx_iter = 0;           /* override of LDPC max_iter (0: leave) */
++int mx_ens_hits = 0;
++unsigned char mx_fail_bytes[2048]; int mx_fail_n = 0, mx_fail_pcc = 0, mx_fail_npar = 0;       /* how many frames the ensemble delivered */
++static unsigned long long mx_rs = 88172645463325252ULL;
++static float mx_gauss(void) {
++  float a = 0.0f;
++  for (int i = 0; i < 4; i++) {
++    mx_rs ^= mx_rs << 13; mx_rs ^= mx_rs >> 7; mx_rs ^= mx_rs << 17;
++    a += (float)(mx_rs >> 40) / 16777216.0f;
++  }
++  return (a - 2.0f) * 1.7320508f;     /* sum of 4 uniforms, unit variance */
++}
++
+ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
+                               int demod_in_is_short, float gain) {
+   int i, k;
+@@ -639,6 +655,7 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
+        * as a fallback if the single-shot decode fails, so retained soft info
+        * can never corrupt a frame that would have decoded on its own. */
+       memcpy(llr_raw, llr, sizeof(float) * Npayloadbitsperpacket);
++      if (mx_iter > 0) ldpc->max_iter = mx_iter;
+       ldpc_decode_frame(ldpc, &parityCheckCount, &iter, decoded_codeword, llr);
+       memcpy(f->rx_payload_bits, decoded_codeword, Ndatabitsperpacket);
+ 
+@@ -698,6 +715,28 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
+           }
+         }
+         if (combined_ok) f->rx_decode_path = 1;
++        /* LAB: ensemble of perturbed belief-propagation decodes. */
++        if (!crc_ok && mx_ens > 0) {
++          float *llr_p = MALLOC(sizeof(float) * Npayloadbitsperpacket);
++          uint8_t *cw = MALLOC(codeword_len);
++          float mag = 0.0f;
++          for (int i = 0; i < Npayloadbitsperpacket; i++) mag += fabsf(llr_raw[i]);
++          mag /= Npayloadbitsperpacket;
++          for (int t = 0; t < mx_ens && !crc_ok; t++) {
++            for (int i = 0; i < Npayloadbitsperpacket; i++)
++              llr_p[i] = llr_raw[i] + mx_ens_sigma * mag * mx_gauss();
++            int pcc = 0, it = 0;
++            ldpc_decode_frame(ldpc, &pcc, &it, cw, llr_p);
++            if (ldpc_harq_combine_parity_ok(pcc, ldpc->NumberParityBits)) {
++              int cl = freedv_crc16_class(f, cw, Ndatabitsperpacket);
++              if (cl != 0) {
++                memcpy(f->rx_payload_bits, cw, Ndatabitsperpacket);
++                crc_class = cl; crc_ok = 1; f->rx_decode_path = 3; mx_ens_hits++;
++              }
++            }
++          }
++          FREE(llr_p); FREE(cw);
++        }
+         /* Alternative channel estimate FALLBACK (docs/improvements/09): the
+          * stock estimate is the mean of two pilots per carrier, and its own
+          * noise costs a dB or more at the SNRs the rungs work at.  A packet
+@@ -771,6 +810,14 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
+           fprintf(stderr, "\n");
+         }
+         // we need a valid CRC to declare a data packet valid
++        if (!crc_ok) {   /* LAB: what the decoder ended on, for piece-survival statistics */
++          mx_fail_n = (Ndatabitsperpacket + 7) / 8;
++          if (mx_fail_n > (int)sizeof(mx_fail_bytes)) mx_fail_n = sizeof(mx_fail_bytes);
++          uint8_t tmpb[2048];
++          freedv_pack(tmpb, f->rx_payload_bits, Ndatabitsperpacket);
++          memcpy(mx_fail_bytes, tmpb, mx_fail_n);
++          mx_fail_pcc = parityCheckCount; mx_fail_npar = ldpc->NumberParityBits;
++        }
+         f->rx_crc_seeded = crc_class == 2;
+         if (crc_ok)
+           rx_status |= FREEDV_RX_BITS;
+diff --git a/modem/freedv/ofdm.c b/modem/freedv/ofdm.c
+index df25d52..8b08dc6 100644
+--- a/modem/freedv/ofdm.c
++++ b/modem/freedv/ofdm.c
+@@ -1036,6 +1036,7 @@ static float est_freq_offset_pilot_corr(struct OFDM *ofdm, complex float *rx,
+  * ofdm_txframe - modulates one frame of symbols
+  * ----------------------------------------------
+  */
++complex float *mx_txgrid = NULL; int mx_tx_rows = 0, mx_tx_cols = 0; int mx_genie = 0; static int mx_rxf = 0;
+ void ofdm_txframe(struct OFDM *ofdm, complex float *tx,
+                   complex float *tx_sym_lin) {
+   complex float aframe[ofdm->np * ofdm->ns][ofdm->nc + 2];
+@@ -1073,6 +1074,18 @@ void ofdm_txframe(struct OFDM *ofdm, complex float *tx,
+     }
+   }
+ 
++  /* LAB: remember the transmitted grid of the last data packet (genie). */
++  if (ofdm->np > 1) {
++    int rows = ofdm->np * ofdm->ns, cols = ofdm->nc + 2;
++    if (mx_txgrid == NULL || mx_tx_rows != rows || mx_tx_cols != cols) {
++      FREE(mx_txgrid);
++      mx_txgrid = MALLOC(sizeof(complex float) * rows * cols);
++      mx_tx_rows = rows; mx_tx_cols = cols;
++    }
++    for (i = 0; i < rows; i++)
++      for (j = 0; j < cols; j++) mx_txgrid[i * cols + j] = aframe[i][j];
++  }
++
+   /* OFDM up-convert symbol by symbol so we can add CP */
+ 
+   for (i = 0, m = 0; i < (ofdm->np * ofdm->ns);
+@@ -1831,6 +1844,27 @@ static void ofdm_chanest_alt(struct OFDM *ofdm, float *aphase, float *aamp) {
+            pc / (wp + wt + wn + wf);
+   }
+ 
++  /* LAB genie: every symbol of this modem frame known, as a receiver that
++   * had already decoded the packet would know it.  The ceiling for any
++   * estimator that works from this frame and its neighbouring pilots. */
++  if (first) mx_rxf = 0;
++  if (mx_genie && mx_txgrid && mx_rxf < ofdm->np && mx_tx_cols == nc + 2) {
++    for (int i = 1; i <= nc; i++) {
++      complex float pc = conjf(ofdm->pilots[i]);
++      complex float num = (wp * ofdm->rx_sym[0][i] + ofdm->rx_sym[1][i] +
++                           ofdm->rx_sym[ofdm->ns + 1][i] + wf * ofdm->rx_sym[ofdm->ns + 2][i]) * pc;
++      float den = (wp > 0) + 2.0f + (wf > 0);
++      if (mx_genie == 2) { num = (ofdm->rx_sym[1][i] + ofdm->rx_sym[ofdm->ns + 1][i]) * pc; den = 2.0f; }
++      for (int rr = 0; rr < ofdm->ns - 1; rr++) {
++        complex float sref = mx_txgrid[(mx_rxf * ofdm->ns + 1 + rr) * mx_tx_cols + i];
++        num += ofdm->rx_sym[rr + 2][i] * conjf(sref);
++        den += cnormf(sref);
++      }
++      g[i] = num / den;
++    }
++  }
++  mx_rxf++;
++
+   int half = ofdm->chanest_alt == OFDM_CHANEST_T4F3   ? 1
+              : ofdm->chanest_alt == OFDM_CHANEST_T4F5 ? 2
+                                                       : 0;
+@@ -1861,6 +1895,35 @@ static void ofdm_chanest_alt(struct OFDM *ofdm, float *aphase, float *aamp) {
+   }
+ }
+ 
++/* ---- LAB (scratch): cyclic-prefix recycling.  A sample in the cyclic prefix
++ * and the sample m later carry the same signal and independent noise, so
++ * averaging the pair halves the noise on it.  mode 1: only the tail side (the
++ * window's first samples and their copies m later, never touched by the
++ * previous symbol); 2: both sides, 4 samples of guard at the head of the
++ * prefix; 3: both sides, 20 samples (2.5 ms) of guard. */
++int mx_cprec = 0;
++static void mx_cp_recycle(struct OFDM *ofdm, complex float *work, int st, float woff_est) {
++  if (!mx_cprec) return;
++  int m = ofdm->m, ncp = ofdm->ncp;
++  int delta = ofdm->sample_point - ofdm->timing_est;
++  if (delta < 0) delta = 0;
++  if (delta > ncp) delta = ncp;
++  int a = ncp - delta - 2;                       /* tail side */
++  int guard = mx_cprec == 3 ? 20 : 4;
++  int b = mx_cprec >= 2 ? delta - guard : 0;     /* head side */
++  for (int k = 0; k < a; k++) {
++    int j = st + k + m;
++    if (j < 0 || j >= ofdm->nrxbuf) break;
++    work[k] = 0.5f * (work[k] + ofdm->rxbuf[j] * cmplxconj(woff_est * j));
++  }
++  for (int k = m - b; k < m; k++) {
++    if (k < 0) continue;
++    int j = st + k - m;
++    if (j < 0 || j >= ofdm->nrxbuf) continue;
++    work[k] = 0.5f * (work[k] + ofdm->rxbuf[j] * cmplxconj(woff_est * j));
++  }
++}
++
+ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+   int prev_timing_est = ofdm->timing_est;
+   int i, j, k, rr, st, en;
+@@ -1971,6 +2034,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+   for (k = 0, j = st; j < en; k++, j++) {
+     work[k] = ofdm->rxbuf[j] * cmplxconj(woff_est * j);
+   }
++  mx_cp_recycle(ofdm, work, st, woff_est);
+ 
+   /*
+    * Each symbol is of course ofdm->samplespersymbol samples long and
+@@ -2009,6 +2073,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+     for (k = 0, j = st; j < en; k++, j++) {
+       work[k] = ofdm->rxbuf[j] * cmplxconj(woff_est * j);
+     }
++    mx_cp_recycle(ofdm, work, st, woff_est);
+ 
+     /*
+      * We put these Nc+2 carrier symbols into our matrix after the previous
+@@ -2057,6 +2122,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+   for (k = 0, j = st; j < en; k++, j++) {
+     work[k] = ofdm->rxbuf[j] * cmplxconj(woff_est * j);
+   }
++  mx_cp_recycle(ofdm, work, st, woff_est);
+ 
+   /*
+    * We put the future pilot after all the previous symbols in the matrix:

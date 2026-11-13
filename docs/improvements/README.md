@@ -16,22 +16,34 @@ first.
 |---|---|---|---|---|---|
 | 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`); impairment library, inverter presets, replay to do |
 | 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | implemented behind `MERCURY_CHANEST`, bench findings in `docs/CHANNEL-ESTIMATION-FINDINGS.md`; ini key, false-accept controls, offset runs, Pi timing, integration A/B to do |
-| 2 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
-| 3 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |
-| 4 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | evidence in tree |
-| 5 | [03-directed-acquisition.md](03-directed-acquisition.md) | #3 | receiver only | 00 | not measured |
-| 6 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | not measured |
-| 7 | [06-mfsk-metrics.md](06-mfsk-metrics.md) | #6 | receiver only | 00 | not measured |
-| 8 | [05-apriori-redecode.md](05-apriori-redecode.md) | #5 | receiver only | 09 (fallback path) | not measured |
-| 9 | [12-osd.md](12-osd.md) | #12 | receiver only | nothing | not measured |
-| 10 | [11-diversity.md](11-diversity.md) | #11 | receiver only, needs hardware | nothing | not measured |
-| 11 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream |
-| 12 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
-| 13 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
-| 14 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
-| 15 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
+| 2 | [19-cp-recycling.md](19-cp-recycling.md) | #19 | receiver only | 09 | prototype measured (0.5-0.8 dB beyond 09) |
+| 3 | [23-rx-effort.md](23-rx-effort.md) | #23 | receiver only | nothing; gates 09 as a default and every later fallback attempt | cost of a failed decode measured on x86; Pi not measured |
+| 4 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
+| 5 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |
+| 6 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | evidence in tree |
+| 7 | [20-decision-directed.md](20-decision-directed.md) | #20 | receiver only | 09, 19, 23 | ceiling measured with a genie (1-2 dB; 2-3× frames on NVIS) |
+| 8 | [03-directed-acquisition.md](03-directed-acquisition.md) | #3 | receiver only | 00 | not measured |
+| 9 | [21-full-frame-acquisition.md](21-full-frame-acquisition.md) | #21 | receiver only | 00; complements 03 | arithmetic only |
+| 10 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | not measured |
+| 11 | [06-mfsk-metrics.md](06-mfsk-metrics.md) | #6 | receiver only | 00 | not measured |
+| 12 | [05-apriori-redecode.md](05-apriori-redecode.md) | #5 | receiver only | 09 (fallback path) | not measured |
+| 13 | [12-osd.md](12-osd.md) | #12 | receiver only | nothing | not measured |
+| 14 | [11-diversity.md](11-diversity.md) | #11 | receiver only, needs hardware | nothing | not measured |
+| 15 | [22-neural-receiver.md](22-neural-receiver.md) | #22 | research (GPU for training) | 00, 20 as the baseline to beat | not started; yardsticks measured |
+| 16 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream |
+| 17 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
+| 18 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
+| 19 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
+| 20 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
 
 Update the status column and tick the task list in the issue as work lands.
+
+[COMPUTE-AND-NEURAL-RESEARCH.md](COMPUTE-AND-NEURAL-RESEARCH.md) is the research note behind
+proposals 19 to 23: how far each mode is from an ideal receiver, what a
+decode costs, what was tried and did **not** work (more decoder iterations,
+ensembles of decodes, salvaging pieces of failed frames), and where neural
+networks do and do not apply. Read it before proposing anything that spends
+more compute.
 
 ## The four rules
 
@@ -264,6 +276,14 @@ These cost time during the prototype; do not repeat them.
 10. **The session streams data to the application before the block CRC-32 is
     checked** (`deliver_in_order`, `carousel.c:1452`). A failed block check
     ends the session on purpose.
+11. **Match bench variant names exactly.** A substring test made the variant
+    `it400` (400 decoder iterations) also match `t4` and switch on proposal
+    09's estimator; the result looked like a 1 dB gain from iterations that
+    does not exist. A sweep over several values exposed it (only 400
+    "worked"). Always sweep a parameter before believing a single point.
+12. **A decode that fails is the expensive case**: all 100 iterations, about
+    0.2 s of a server core for the 16200-bit code, against an allowance of
+    about 1 s. Every fallback attempt is another one. See proposal 23.
 
 ## Glossary
 

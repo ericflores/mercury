@@ -1,0 +1,6 @@
+QAM16C2 1215 B, chan AWGN
+SNR3k    meas              stock            cp2           t4f3       t4f3+cp2   (acquired/delivered per 60)
+   +6.0    +6.00        60/0           60/0           60/0           60/0       any   0
+   +6.5    +6.50        60/0           60/0           60/0           60/54      any  54
+   +7.0    +7.00        60/0           60/0           60/58          60/60      any  60
+   +7.5    +7.50        60/0           60/24          60/60          60/60      any  60

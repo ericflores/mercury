@@ -6,9 +6,9 @@ from codec2 with local changes, and a receiver-driven, erasure-coded ARQ
 
 ## What this fork is for
 
-An improvement programme tracked in GitHub issue #1 of this fork: 15
-independent proposals plus the bench tooling they share, one sub-issue each
-(#2 to #17). The working specifications are in the repository:
+An improvement programme tracked in GitHub issue #1 of this fork: independent
+proposals plus the bench tooling they share, one sub-issue each (#2 to #17
+and #19 to #23). The working specifications are in the repository:
 
 1. **`docs/improvements/README.md`**: the handbook. Read it first: order of
    work, the four rules, repository map, build and test commands, how to add
@@ -19,6 +19,9 @@ independent proposals plus the bench tooling they share, one sub-issue each
    tests, acceptance criteria.
 3. **`docs/improvements/prototype/`**: the scratch prototype and raw results
    behind the first measurements. Reference only.
+4. **`docs/improvements/COMPUTE-AND-NEURAL-RESEARCH.md`**: what more compute
+   (desktop, GPU, neural networks) can and cannot buy, with measurements,
+   including ideas already tried that did not work.
 
 Work one proposal at a time, in the order of the handbook's table, unless
 the user says otherwise. Start with `00-bench.md`.

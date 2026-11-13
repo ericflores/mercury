@@ -1,0 +1,3 @@
+DATAC3 128 B, chan AWGN
+SNR3k    meas              stock          ens10          ens50          it400   (acquired/delivered per 100)
+   -4.5    -4.50        78/14          78/14          78/14          78/63      any  63

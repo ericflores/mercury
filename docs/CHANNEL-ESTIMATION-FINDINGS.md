@@ -157,7 +157,15 @@ or a Doppler spread the pilot spacing cannot follow). No loss in either.
 One more LDPC decode on a packet that failed, which is the expensive case
 (a failed decode runs all 100 iterations). Packets that decode first time
 pay only the second estimate: four weighted sums per carrier per modem
-frame and a copy of the symbol buffer. Not yet timed on a Pi 4.
+frame and a copy of the symbol buffer.
+
+Measured later on one 2.1 GHz Xeon core: a failed decode costs about 60 ms
+(DATAC3), 100 ms (DATAC1), 210 ms (DATAC17) and 235 ms (QAM16C2), against
+an allowance of about 1 s (`D_OFDM_MS`). So the second attempt fits easily
+on that class of machine. A Raspberry Pi 4 core is several times slower and
+**has not been timed**: for the two largest codes the second attempt may not
+fit there. Issue #23 (`docs/improvements/23-rx-effort.md`) is the work that
+settles it, and it must precede any change of this feature's default.
 
 ## Caveats
 

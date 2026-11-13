@@ -1,0 +1,4 @@
+DATAC1 512 B, chan CCIR 520 Poor: 2 ms, 1 Hz
+No       meas              stock          it400       t4f3+cp3 t4f3+cp3+it400   (acquired/delivered per 100)
+  -34.0    +3.88        99/68          99/78          99/94          99/94      any  95
+  -32.0    +1.88        96/13          96/26          96/59          96/61      any  62

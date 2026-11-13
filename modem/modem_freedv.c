@@ -6,9 +6,54 @@
 
 #include "modem_freedv.h"
 #include "freedv_api.h"
+#include "codec2_ofdm.h"
+#include <stdlib.h>
+#include <string.h>
 
 /* ctx is the struct freedv *. */
 #define FDV(ctx) ((struct freedv *)(ctx))
+
+/* The alternative channel estimate (docs/improvements/09): a second decode
+ * attempt, from an estimate over more pilots, for packets whose stock decode
+ * failed.  OFF unless asked for: MERCURY_CHANEST=t4|t4f3|t4f5|auto, or
+ * modem_freedv_set_chanest() before the instances are opened.  "auto" is
+ * time averaging alone on the modes of 3 or 4 carriers, where there is
+ * nothing to smooth across, and 1-2-1 across carriers on the rest. */
+#define CHANEST_AUTO (-1)
+static int g_chanest = -2;          /* -2: not read yet */
+
+void modem_freedv_set_chanest(int mode) { g_chanest = mode; }
+
+static int chanest_setting(void)
+{
+    if (g_chanest == -2)
+    {
+        const char *e = getenv("MERCURY_CHANEST");
+        g_chanest = !e || !*e            ? OFDM_CHANEST_OFF
+                  : !strcmp(e, "auto")   ? CHANEST_AUTO
+                  : !strcmp(e, "t4")     ? OFDM_CHANEST_T4
+                  : !strcmp(e, "t4f3")   ? OFDM_CHANEST_T4F3
+                  : !strcmp(e, "t4f5")   ? OFDM_CHANEST_T4F5
+                  : OFDM_CHANEST_OFF;
+    }
+    return g_chanest;
+}
+
+static int chanest_for_mode(int mode)
+{
+    int c = chanest_setting();
+    if (c != CHANEST_AUTO)
+        return c;
+    switch (mode)
+    {
+    case FREEDV_MODE_DATAC15: case FREEDV_MODE_DATAC16:
+    case FREEDV_MODE_DATAC13: case FREEDV_MODE_DATAC14:
+    case FREEDV_MODE_DATAC4:
+        return OFDM_CHANEST_T4;
+    default:
+        return OFDM_CHANEST_T4F3;
+    }
+}
 
 static void *fdv_open(int mode)
 {
@@ -20,7 +65,10 @@ static void *fdv_open(int mode)
         struct freedv_advanced adv = {0, 4, 50, 8000, 750, 250, codename};
         return freedv_open_advanced(mode, &adv);
     }
-    return freedv_open(mode);
+    struct freedv *f = freedv_open(mode);
+    if (f)
+        freedv_set_chanest_alt(f, chanest_for_mode(mode));
+    return f;
 }
 
 static void fdv_close(void *ctx)                 { if (ctx) freedv_close(FDV(ctx)); }

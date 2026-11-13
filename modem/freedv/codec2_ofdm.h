@@ -133,6 +133,15 @@ void ofdm_set_freq_search_fine(struct OFDM *, float hz);
  * clipper requires it.  See utils/qam16_papr_sweep.c. */
 void ofdm_set_tx_clip_config(struct OFDM *, bool clip_en, float gain1,
                              float gain2, float amp_scale);
+/* Alternative channel estimate for the data modes, used by the receiver as
+ * a second decode attempt when the stock one fails its CRC.  See
+ * docs/improvements/09-channel-estimation.md. */
+#define OFDM_CHANEST_OFF 0
+#define OFDM_CHANEST_T4 1   /* pilots prev/this/next/future, weights 1,3,3,1 */
+#define OFDM_CHANEST_T4F3 2 /* ...and 1-2-1 across adjacent carriers */
+#define OFDM_CHANEST_T4F5 3 /* ...and 1-2-3-2-1 across carriers */
+void ofdm_set_chanest_alt(struct OFDM *, int mode);
+int ofdm_get_chanest_alt(struct OFDM *);
 void ofdm_set_sync(struct OFDM *, int);
 void ofdm_set_tx_bpf(struct OFDM *, bool);
 void ofdm_set_dpsk(struct OFDM *ofdm, bool val);

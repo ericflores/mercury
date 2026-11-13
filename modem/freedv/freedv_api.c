@@ -199,6 +199,8 @@ void freedv_close(struct freedv *freedv) {
   FREE(freedv->tx_payload_bits);
   FREE(freedv->rx_payload_bits);
   FREE(freedv->harq_llr);
+  FREE(freedv->rx_syms_alt);
+  FREE(freedv->rx_amps_alt);
   if (freedv->codec2) codec2_destroy(freedv->codec2);
 
   if (FDV_MODE_ACTIVE(FREEDV_MODE_1600, freedv->mode)) {
@@ -1721,6 +1723,19 @@ float freedv_get_modem_bandwidth_hz(struct freedv *freedv) {
 
 void freedv_set_acq_fft_enable(struct freedv *f, bool val) {
   if (f != NULL && f->ofdm != NULL) ofdm_set_acq_fft_enable(f->ofdm, val);
+}
+
+void freedv_set_chanest_alt(struct freedv *f, int mode) {
+  if (f != NULL && f->ofdm != NULL && f->rx_syms_alt != NULL)
+    ofdm_set_chanest_alt(f->ofdm, mode);
+}
+
+int freedv_get_chanest_alt(struct freedv *f) {
+  return (f != NULL && f->ofdm != NULL) ? ofdm_get_chanest_alt(f->ofdm) : 0;
+}
+
+int freedv_get_rx_decode_path(struct freedv *f) {
+  return f != NULL ? f->rx_decode_path : 0;
 }
 
 void freedv_set_timing_mx_thresh(struct freedv *f, float val) {

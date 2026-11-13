@@ -245,6 +245,11 @@ void freedv_ofdm_data_open(struct freedv *f, struct freedv_advanced *adv) {
     f->rx_amps[i] = 0.0;
   }
 
+  f->rx_syms_alt = (COMP *)CALLOC(Nsymsperpacket, sizeof(COMP));
+  assert(f->rx_syms_alt != NULL);
+  f->rx_amps_alt = (float *)CALLOC(Nsymsperpacket, sizeof(float));
+  assert(f->rx_amps_alt != NULL);
+
   f->nin = f->nin_prev = ofdm_get_nin(f->ofdm);
   f->n_nat_modem_samples = ofdm_get_samples_per_packet(f->ofdm);
   f->n_nom_modem_samples = ofdm_get_samples_per_frame(f->ofdm);
@@ -582,6 +587,17 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
            sizeof(complex float) * Nsymsperframe);
     memcpy(&rx_amps[Nsymsperpacket - Nsymsperframe], ofdm->rx_amp,
            sizeof(float) * Nsymsperframe);
+    if (ofdm->chanest_alt && f->rx_syms_alt != NULL) {
+      complex float *sa = (complex float *)f->rx_syms_alt;
+      memmove(sa, &sa[Nsymsperframe],
+              sizeof(complex float) * (Nsymsperpacket - Nsymsperframe));
+      memmove(f->rx_amps_alt, &f->rx_amps_alt[Nsymsperframe],
+              sizeof(float) * (Nsymsperpacket - Nsymsperframe));
+      memcpy(&sa[Nsymsperpacket - Nsymsperframe], ofdm->rx_np_alt,
+             sizeof(complex float) * Nsymsperframe);
+      memcpy(&f->rx_amps_alt[Nsymsperpacket - Nsymsperframe], ofdm->rx_amp_alt,
+             sizeof(float) * Nsymsperframe);
+    }
 
     /* look for UW as frames enter packet buffer, note UW may span several
      * modem frames */
@@ -629,6 +645,8 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
       if (strlen(ofdm->data_mode)) {
         int crc_class = freedv_crc16_class(f, f->rx_payload_bits, Ndatabitsperpacket);
         int crc_ok = crc_class != 0;
+        int combined_ok = 0;
+        f->rx_decode_path = 0;
         /* HARQ Chase combining FALLBACK: only when the single-shot decode
          * failed, add the retained running sum of prior (same-frame) LLRs and
          * retry.  Independent noise realisations of the same codeword add
@@ -676,6 +694,47 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
             memcpy(f->rx_payload_bits, decoded_codeword, Ndatabitsperpacket);
             crc_class = freedv_crc16_class(f, f->rx_payload_bits, Ndatabitsperpacket);
             crc_ok = crc_class != 0;
+            combined_ok = crc_ok;
+          }
+        }
+        if (combined_ok) f->rx_decode_path = 1;
+        /* Alternative channel estimate FALLBACK (docs/improvements/09): the
+         * stock estimate is the mean of two pilots per carrier, and its own
+         * noise costs a dB or more at the SNRs the rungs work at.  A packet
+         * that failed above is decoded once more from the symbols the
+         * estimate over four pilot rows (and, by mode, adjacent carriers)
+         * corrected.  Only on failure, so a frame that decodes today is
+         * never touched; the same parity gate as the combine path, because
+         * this too is reached on purpose at the cliff, where a decode that
+         * has not converged still has its 2^-16 chance at the CRC. */
+        if (!crc_ok && ofdm->chanest_alt && f->rx_syms_alt != NULL) {
+          COMP alt_syms[Npayloadsymsperpacket];
+          float alt_amps[Npayloadsymsperpacket];
+          COMP alt_syms_de[Npayloadsymsperpacket];
+          float alt_amps_de[Npayloadsymsperpacket];
+          short alt_txt[f->ofdm_ntxtbits > 0 ? f->ofdm_ntxtbits : 1];
+          float llr_alt[Npayloadbitsperpacket];
+          uint8_t alt_codeword[codeword_len];
+          int alt_txt_index = 0, alt_pcc = 0, alt_iter = 0;
+          ofdm_disassemble_psk_modem_packet_with_text_amps(
+              ofdm, (complex float *)f->rx_syms_alt, f->rx_amps_alt, alt_syms,
+              alt_amps, alt_txt, &alt_txt_index);
+          gp_deinterleave_comp(alt_syms_de, alt_syms, Npayloadsymsperpacket);
+          gp_deinterleave_float(alt_amps_de, alt_amps, Npayloadsymsperpacket);
+          symbols_to_llrs(llr_alt, alt_syms_de, alt_amps_de, EsNo,
+                          ofdm->mean_amp, ofdm->bps, Npayloadsymsperpacket);
+          ldpc_decode_frame(ldpc, &alt_pcc, &alt_iter, alt_codeword, llr_alt);
+          if (ldpc_harq_combine_parity_ok(alt_pcc, ldpc->NumberParityBits)) {
+            int alt_class =
+                freedv_crc16_class(f, alt_codeword, Ndatabitsperpacket);
+            if (alt_class != 0) {
+              memcpy(f->rx_payload_bits, alt_codeword, Ndatabitsperpacket);
+              crc_class = alt_class;
+              crc_ok = 1;
+              parityCheckCount = alt_pcc;
+              iter = alt_iter;
+              f->rx_decode_path = 2;
+            }
           }
         }
         if (!crc_ok && f->verbose) {

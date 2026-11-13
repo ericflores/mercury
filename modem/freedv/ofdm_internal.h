@@ -199,6 +199,16 @@ struct OFDM {
   float *rx_amp;
   float *aphase_est_pilot_log;
 
+  /* Alternative channel estimate (Mercury, docs/improvements/09): a second
+   * phase/amplitude reference per carrier averaged over more pilots than the
+   * stock two.  Only rx_np_alt/rx_amp_alt are written from it; sync, the
+   * unique word, hard decisions and the SNR estimate keep the stock one.
+   * chanest_alt 0 (default) computes nothing. */
+  int chanest_alt;
+  complex float *rx_np_alt;
+  float *rx_amp_alt;
+  complex float chanest_slope;
+
   uint8_t tx_uw[MAX_UW_BITS];
   int *uw_ind;
   int *uw_ind_sym;

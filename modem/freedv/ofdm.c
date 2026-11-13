@@ -372,6 +372,14 @@ struct OFDM *ofdm_create(const struct OFDM_CONFIG *config) {
   ofdm->rx_amp = MALLOC(sizeof(float) * (ofdm->rowsperframe * ofdm->nc));
   assert(ofdm->rx_amp != NULL);
 
+  ofdm->rx_np_alt =
+      CALLOC(ofdm->rowsperframe * ofdm->nc, sizeof(complex float));
+  assert(ofdm->rx_np_alt != NULL);
+  ofdm->rx_amp_alt = CALLOC(ofdm->rowsperframe * ofdm->nc, sizeof(float));
+  assert(ofdm->rx_amp_alt != NULL);
+  ofdm->chanest_alt = OFDM_CHANEST_OFF;
+  ofdm->chanest_slope = 0.0f;
+
   ofdm->aphase_est_pilot_log =
       MALLOC(sizeof(float) * (ofdm->rowsperframe * ofdm->nc));
   assert(ofdm->aphase_est_pilot_log != NULL);
@@ -652,6 +660,8 @@ void ofdm_destroy(struct OFDM *ofdm) {
   FREE(ofdm->rx_sym);
   FREE(ofdm->rx_np);
   FREE(ofdm->rx_amp);
+  FREE(ofdm->rx_np_alt);
+  FREE(ofdm->rx_amp_alt);
   FREE(ofdm->aphase_est_pilot_log);
   FREE(ofdm->tx_uw_syms);
   FREE(ofdm->uw_ind);
@@ -1780,6 +1790,77 @@ void ofdm_demod_shorts(struct OFDM *ofdm, int *rx_bits, short *rxbuf_in,
  * This is the rest of the function which expects that the data is
  * already in ofdm->rxbuf
  */
+void ofdm_set_chanest_alt(struct OFDM *ofdm, int mode) {
+  if (mode < OFDM_CHANEST_OFF || mode > OFDM_CHANEST_T4F5)
+    mode = OFDM_CHANEST_OFF;
+  ofdm->chanest_alt = mode;
+}
+
+int ofdm_get_chanest_alt(struct OFDM *ofdm) { return ofdm->chanest_alt; }
+
+/* The alternative estimate: per carrier, the four pilot rows the demodulator
+ * already holds (previous, this, next, future) weighted 1,3,3,1, then
+ * optionally smoothed across adjacent carriers.
+ *
+ * Two things the stock two-pilot estimate never had to care about:
+ *  - The burst's first modem frame has the preamble where its "previous"
+ *    pilot would be, and the last has nothing where its "future" pilot would
+ *    be: those rows are left out there.
+ *  - The FFT window may start anywhere in the cyclic prefix, which rotates
+ *    each carrier against its neighbour by up to tens of degrees.  Averaging
+ *    neighbours without undoing that slope delivered 0/20 DATAC1 frames at
+ *    +5 dB (docs/improvements/prototype), so the common slope is tracked
+ *    over the burst and removed before smoothing. */
+static void ofdm_chanest_alt(struct OFDM *ofdm, float *aphase, float *aamp) {
+  int nc = ofdm->nc;
+  complex float g[nc + 2];
+  float wp = 1.0f, wt = 3.0f, wn = 3.0f, wf = 1.0f;
+  int first = (ofdm->sync_state == trial && ofdm->sync_counter == 0);
+  int last = (ofdm->sync_state == synced && ofdm->modem_frame == ofdm->np - 1);
+  if (first) {
+    wp = 0.0f;
+    ofdm->chanest_slope = 0.0f;
+  }
+  if (last) wf = 0.0f;
+
+  for (int i = 1; i <= nc; i++) {
+    complex float pc = conjf(ofdm->pilots[i]);
+    g[i] = (wp * ofdm->rx_sym[0][i] + wt * ofdm->rx_sym[1][i] +
+            wn * ofdm->rx_sym[ofdm->ns + 1][i] +
+            wf * ofdm->rx_sym[ofdm->ns + 2][i]) *
+           pc / (wp + wt + wn + wf);
+  }
+
+  int half = ofdm->chanest_alt == OFDM_CHANEST_T4F3   ? 1
+             : ofdm->chanest_alt == OFDM_CHANEST_T4F5 ? 2
+                                                      : 0;
+  float th = 0.0f;
+  if (half) {
+    complex float sl = 0.0f;
+    for (int i = 1; i < nc; i++) sl += g[i + 1] * conjf(g[i]);
+    ofdm->chanest_slope = 0.7f * ofdm->chanest_slope + sl;
+    th = cargf(ofdm->chanest_slope + 1E-12f);
+  }
+  static const float w3[3] = {1, 2, 1}, w5[5] = {1, 2, 3, 2, 1};
+  const float *wv = half == 1 ? w3 : w5;
+  for (int i = 1; i <= nc; i++) {
+    complex float h = g[i];
+    if (half) {
+      float w = 0.0f;
+      h = 0.0f;
+      for (int d = -half; d <= half; d++) {
+        int q = i + d;
+        if (q < 1 || q > nc) continue;
+        h += wv[d + half] * g[q] * cmplxconj(th * d);
+        w += wv[d + half];
+      }
+      h /= w;
+    }
+    aphase[i] = cargf(h);
+    aamp[i] = cabsf(h);
+  }
+}
+
 static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
   int prev_timing_est = ofdm->timing_est;
   int i, j, k, rr, st, en;
@@ -2112,6 +2193,10 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
     aamp_est_pilot[i] = cabsf(aphase_est_pilot_rect);
   }
 
+  float aphase_alt[ofdm->nc + 2];
+  float aamp_alt[ofdm->nc + 2];
+  if (ofdm->chanest_alt) ofdm_chanest_alt(ofdm, aphase_alt, aamp_alt);
+
   /*
    * correct the phase offset using phase estimate, and demodulate
    * bits, separate loop as it runs across cols (carriers) to get
@@ -2157,6 +2242,12 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
        */
       ofdm->rx_amp[(rr * ofdm->nc) + (i - 1)] = aamp_est_pilot[i];
       sum_amp += aamp_est_pilot[i];
+
+      if (ofdm->chanest_alt) {
+        ofdm->rx_np_alt[(rr * ofdm->nc) + (i - 1)] =
+            ofdm->rx_sym[rr + 2][i] * cmplxconj(aphase_alt[i]);
+        ofdm->rx_amp_alt[(rr * ofdm->nc) + (i - 1)] = aamp_alt[i];
+      }
 
       /*
        * Note like amps in this implementation phase ests are the

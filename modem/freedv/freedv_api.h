@@ -275,6 +275,15 @@ void freedv_set_acq_fft_enable(struct freedv *freedv, bool val);
  * changes acquisition behaviour only, not the on-air frame format.  The
  * getters report the LIVE values, so a tool can print what it actually
  * measured with instead of restating ofdm_mode.c. */
+/* Alternative channel estimate for the OFDM data modes (OFDM_CHANEST_* in
+ * codec2_ofdm.h; 0 = off, the default).  When on, a packet whose stock
+ * decode fails its CRC is decoded once more from an estimate averaged over
+ * more pilots.  The stock decode is untouched, so nothing that decodes
+ * today is lost.  freedv_get_rx_decode_path: which attempt delivered the
+ * last frame (0 stock, 1 HARQ combine, 2 alternative estimate). */
+void freedv_set_chanest_alt(struct freedv *freedv, int mode);
+int freedv_get_chanest_alt(struct freedv *freedv);
+int freedv_get_rx_decode_path(struct freedv *freedv);
 void freedv_set_timing_mx_thresh(struct freedv *freedv, float val);
 void freedv_set_bad_uw_errors(struct freedv *freedv, int val);
 float freedv_get_timing_mx_thresh(struct freedv *freedv);

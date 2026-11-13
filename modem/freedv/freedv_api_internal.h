@@ -216,6 +216,14 @@ struct freedv {
    * the running LLR sum; harq_valid marks it occupied; the caller must call
    * freedv_harq_reset() whenever a *new* frame (not a retransmit) is expected
    * so stale soft information is not combined across different payloads. */
+  /* Second decode attempt from the alternative channel estimate
+   * (ofdm->chanest_alt): the packet's symbols and amplitudes as that
+   * estimate corrected them, kept beside rx_syms/rx_amps.  rx_decode_path
+   * says which attempt delivered the last frame: 0 stock, 1 HARQ combine,
+   * 2 alternative estimate. */
+  COMP *rx_syms_alt;
+  float *rx_amps_alt;
+  int rx_decode_path;
   float *harq_llr;
   int harq_llr_nbits;
   int harq_enable;

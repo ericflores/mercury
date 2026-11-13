@@ -15,4 +15,9 @@
 
 extern const modem_backend_t modem_backend_freedv;
 
+/* The alternative channel estimate for instances opened from now on:
+ * OFDM_CHANEST_* (codec2_ofdm.h), or -1 for the per-mode choice.  Overrides
+ * MERCURY_CHANEST.  Off by default. */
+void modem_freedv_set_chanest(int mode);
+
 #endif /* MERCURY_MODEM_FREEDV_H */

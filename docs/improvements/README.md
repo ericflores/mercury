@@ -17,7 +17,7 @@ first.
 | 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`); impairment library, inverter presets, replay to do |
 | 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | implemented behind `MERCURY_CHANEST`, bench findings in `docs/CHANNEL-ESTIMATION-FINDINGS.md`; ini key, false-accept controls, offset runs, Pi timing, integration A/B to do |
 | 2 | [19-cp-recycling.md](19-cp-recycling.md) | #19 | receiver only | 09 | implemented behind `MERCURY_CP_RECYCLE`, bench findings in `docs/CP-RECYCLING-FINDINGS.md`; guard/margin sweep, offset runs, false-accept controls, Pi timing to do |
-| 3 | [26-window-placement.md](26-window-placement.md) | #26 | receiver only | 09, 19 (the attempt list), 23 | prototype measured: on disturbed NVIS (7 ms) DATAC1 12 → 58 of 60 frames at +7.8 dB, DATAC3 27 → 57; neutral on white noise and CCIR Poor |
+| 3 | [26-window-placement.md](26-window-placement.md) | #26 | receiver only | 09, 19 (the attempt list), 23 | implemented behind `MERCURY_PROFILE_TRACK`, bench findings in `docs/PROFILE-TRACKING-FINDINGS.md`: on disturbed NVIS DATAC1 12 → 55 of 60 at +7.8 dB, DATAC3 27 → 53; a second opinion at the unique word (the gap to the prototype), other presets, offsets, false-accept controls, Pi timing to do |
 | 4 | [23-rx-effort.md](23-rx-effort.md) | #23 | receiver only | nothing; gates 09 as a default and every later fallback attempt | cost of a failed decode measured on x86; Pi not measured |
 | 5 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
 | 6 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |

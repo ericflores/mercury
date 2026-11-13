@@ -24,14 +24,20 @@ to +18 dB. The prototype below delivers half of them at +4 dB, 82 % at
   ofdm->sample_point = min(ofdm->timing_est + ofdm->ncp - 4, ofdm->sample_point);
   ```
 
-  and every row's FFT starts at `... + 1 + ofdm->sample_point`. A new burst
-  starts with `sample_point = timing_est = 0`
-  (`ofdm_sync_search_burst`), so the window starts **about 4 samples into
-  the cyclic prefix of the path the detector found**. Measured on white
-  noise: the lag of that path (window start minus the start of its useful
-  part) is −42 to −43 samples; `ncp` is 48.
-- So the stock window tolerates a path up to about 5.5 ms **earlier** than
-  the detected one and only 0.5 ms **later**. A later path beyond that puts
+  and every row's FFT starts at `... + 1 + ofdm->sample_point`. So the
+  window is kept between 4 and `ncp − 4` samples into the cyclic prefix of
+  the path the correlator finds, and it does not move while it is inside
+  that range.
+- The burst search does **not** reset `timing_est` and `sample_point` (the
+  reset is in `ofdm_sync_search_stream()` only): a burst starts from what the
+  previous burst left, and its first frame's timing update applies the two
+  lines above. On a new instance, and after bursts with a steady timing,
+  that leaves the window **about 4 samples into the prefix** (measured on
+  white noise: the lag of the path, window start minus the start of its
+  useful part, is −42 to −43 samples; `ncp` is 48). After a burst on which
+  the tracker wandered it can be anywhere in the range.
+- So the stock window, in its usual place, tolerates a path up to about
+  5.5 ms **earlier** than the detected one and only 0.5 ms **later**. A later path beyond that puts
   its previous symbol inside the window.
 - The per-frame tracker is `est_timing()` over `ftwindowwidth` samples
   around the current estimate (80 for the data modes, `ofdm_mode.c`: ±5 ms).
@@ -195,7 +201,9 @@ second time from the samples the receiver still holds:
    `rx_amp`; the sample buffer shared, read-only), restore the saved fields,
    set its `rxbufst` to where that first frame now is in the buffer, and run
    `np` frames with
-   - no `est_timing()` call: after each frame's path detection,
+   - the stock timing update on the **first** frame only (it is what puts
+     the window back inside the detected path's prefix, see Facts), then no
+     `est_timing()` call: after each frame's path detection,
      `sample_point = w` and `timing_est = w − ncp/2`, so the existing
      quarter-symbol grid shift keeps the grid centred on the tracker's
      window, not on a correlator;
@@ -281,6 +289,40 @@ burst (then the replay would reproduce the stock rows).
 - Tell the carousel: a session on a long-profile channel may deserve rungs
   the ladder now avoids there. Ladder constants are not touched in this
   proposal.
+
+## As built (2026-11-13)
+
+Implemented as designed in sections 1 to 4, behind `MERCURY_PROFILE_TRACK`
+/ `[audio] rx_profile_track`; measurements in
+`docs/PROFILE-TRACKING-FINDINGS.md`. What the implementation found:
+
+- **A burst on which the stock chain drops sync at the unique word never
+  reaches the attempt.** The unique word is checked after the first few
+  frames; if it fails, the state machine returns to search and zeroes the
+  buffer, and there is no end of packet to hang a replay on. That is the
+  whole difference from the lab receiver, which was the only chain and
+  passed the unique word itself: DATAC1 55 of 60 where the lab had 58,
+  DATAC3 52-53 where it had 57. Every replay that did run in the traced
+  case delivered its frame.
+- Only the first packet of a burst is replayed (Mercury sends one packet a
+  burst), and only in burst mode.
+- The attempt decodes from the `t4` rows, so on channels where the window
+  was never the problem (white noise, CCIR Poor) the switch alone behaves
+  like proposal 09's `t4`.
+- Not implemented: skipping the replay when it would reproduce the stock
+  rows; the adaptive guard for 19; sections 5's later items.
+
+Next, in order of what they are worth:
+
+1. **A second opinion at the unique word.** When the stock unique word
+   fails, replay the frames received so far with the tracker and check the
+   unique word on those symbols; if it passes, let the stock chain go on
+   counting frames instead of returning to search, so the end-of-packet
+   attempt can run. This touches the state machine's path when the feature
+   is on, so it needs the false-sync control (noise only, and a burst of
+   another mode) before anything else.
+2. The steps below that were not run: the other presets, offsets, sweeps.
+3. The tracker live and first (section 6).
 
 ## Steps
 

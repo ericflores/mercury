@@ -69,6 +69,7 @@
 #define CFG_KEY_DISCONNECT_DRAIN_TIMEOUT_S "arq:disconnect_drain_timeout_s"
 #define CFG_KEY_TX_GAIN_DB          "audio:tx_gain_db"
 #define CFG_KEY_TX_DELAY_MS         "audio:tx_delay_ms"
+#define CFG_KEY_RX_CHANEST          "audio:rx_chanest"
 #define CFG_KEY_TNC_KEEPALIVE_S     "tnc:keepalive_s"
 #define CFG_KEY_TNC_BUFFER_REPORT_MS "tnc:buffer_report_ms"
 #define CFG_KEY_ARQ_RETRY_STAGGER_MS          "arq:retry_stagger_ms"
@@ -135,6 +136,11 @@ typedef struct {
     int      max_keydown_s;             /* ARQ: longest carousel round asked
                                          * for or sent, in s.  0 (default):
                                          * the protocol's 30 s; else 5..30.  */
+    int      rx_chanest;            /* Second decode attempt from a channel
+                                    * estimate over more pilots (issue #9):
+                                    * 0 off (default), 1 t4, 2 t4f3, 3 t4f5,
+                                    * -1 auto (by mode).  The ini value is
+                                    * the name: off, t4, t4f3, t4f5, auto. */
     float    tx_gain_db;            /* Linear-equivalent gain on the modulator
                                     * TX samples, in dB. 0.0 = no change.
                                     * Range -20.0 .. +20.0 (clamped). */

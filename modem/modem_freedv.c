@@ -15,28 +15,28 @@
 
 /* The alternative channel estimate (docs/improvements/09): a second decode
  * attempt, from an estimate over more pilots, for packets whose stock decode
- * failed.  OFF unless asked for: MERCURY_CHANEST=t4|t4f3|t4f5|auto, or
- * modem_freedv_set_chanest() before the instances are opened.  "auto" is
+ * failed.  OFF unless asked for: audio:rx_chanest in the ini
+ * (modem_freedv_set_chanest(), before the instances are opened) or
+ * MERCURY_CHANEST=off|t4|t4f3|t4f5|auto.  "auto" is
  * time averaging alone on the modes of 3 or 4 carriers, where there is
  * nothing to smooth across, and 1-2-1 across carriers on the rest. */
 #define CHANEST_AUTO (-1)
-static int g_chanest = -2;          /* -2: not read yet */
+static int g_chanest = OFDM_CHANEST_OFF;
 
 void modem_freedv_set_chanest(int mode) { g_chanest = mode; }
 
+/* The environment variable, when set, wins over the ini value: it is the
+ * A/B switch for a bench or an on-air session. */
 static int chanest_setting(void)
 {
-    if (g_chanest == -2)
-    {
-        const char *e = getenv("MERCURY_CHANEST");
-        g_chanest = !e || !*e            ? OFDM_CHANEST_OFF
-                  : !strcmp(e, "auto")   ? CHANEST_AUTO
-                  : !strcmp(e, "t4")     ? OFDM_CHANEST_T4
-                  : !strcmp(e, "t4f3")   ? OFDM_CHANEST_T4F3
-                  : !strcmp(e, "t4f5")   ? OFDM_CHANEST_T4F5
-                  : OFDM_CHANEST_OFF;
-    }
-    return g_chanest;
+    const char *e = getenv("MERCURY_CHANEST");
+    if (!e || !*e)
+        return g_chanest;
+    return !strcmp(e, "auto") ? CHANEST_AUTO
+         : !strcmp(e, "t4")   ? OFDM_CHANEST_T4
+         : !strcmp(e, "t4f3") ? OFDM_CHANEST_T4F3
+         : !strcmp(e, "t4f5") ? OFDM_CHANEST_T4F5
+         : OFDM_CHANEST_OFF;
 }
 
 static int chanest_for_mode(int mode)

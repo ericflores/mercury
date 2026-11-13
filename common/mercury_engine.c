@@ -22,6 +22,7 @@
 #include "arq.h"
 #include "arq_protocol.h"
 #include "modem.h"
+#include "modem_freedv.h"
 #include "broadcast.h"
 #include "defines_modem.h"
 #include "audioio/audioio.h"
@@ -194,6 +195,7 @@ int mercury_engine_init(const mercury_config *cfg,
     arq_set_max_keydown_s(cfg->max_keydown_s);
     modem_set_tx_gain(powf(10.0f, cfg->tx_gain_db / 20.0f));
     modem_set_tx_delay_ms(cfg->tx_delay_ms);
+    modem_freedv_set_chanest(cfg->rx_chanest);
     modem_set_busy_cfg((float)cfg->busy_threshold_db,
                        (float)cfg->busy_hysteresis_db,
                        (uint32_t)cfg->busy_on_debounce_ms,

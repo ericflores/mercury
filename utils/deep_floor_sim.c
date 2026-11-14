@@ -56,7 +56,11 @@
  *   DFS_METRIC=awgn     ln I0 symbol metric instead of the fading one
  *   DFS_NORM=sym        each symbol's bins divided by its own median bin
  *                       (robust to impulses; see g_norm_sym)
+ *   DFS_NORM=bin|both   each bin divided by its own median over the frame
+ *                       (robust to a narrow foreign signal; see g_norm_bin)
  *   DFS_IMP=rate,dB     impulses: rate per second, 2 ms each, dB over the signal
+ *   DFS_FSK=Hz,dB[,baud,shift]  a 2-FSK foreign signal, offset from the
+ *                       band's centre, dB over the signal's power
  *   DFS_SYNC=spread     known symbols at the start, middle and end (3+2+3)
  *                       instead of a preamble
  *   DFS_SYNCSTAT=energy the plain energy sum as the search metric instead of
@@ -193,6 +197,16 @@ static int g_metric_awgn = 0; /* DFS_METRIC=awgn: ln I0 instead of the fading me
  * is not, and divided out.  A tone in one bin of 256 barely moves the
  * median, so the signal is not divided out with it. */
 static int g_norm_sym = 0;
+/* DFS_NORM=bin (or both): each bin divided by its own median over the
+ * frame's data symbols: a narrow foreign signal that sits on a few bins for
+ * the whole frame is then no louder than the noise there, instead of
+ * looking like the transmitted symbol in every symbol (the noise-aware
+ * weights of proposal 07, for the floor). */
+static int g_norm_bin = 0;
+/* DFS_FSK=offset_hz,dB[,baud,shift]: a 2-FSK foreign signal at that offset
+ * from the band's centre, dB relative to the signal's power, added after
+ * the channel (RTTY-like by default: 45.45 baud, 170 Hz) */
+static double g_fsk_hz = 0, g_fsk_db = -999, g_fsk_baud = 45.45, g_fsk_shift = 170.0;
 /* DFS_IMP=rate,dB: impulses, rate per second, each 2 ms of complex noise
  * dB above the signal's power, as utils/rx_bench adds them */
 static double g_imp_rate = 0.0, g_imp_db = 0.0;
@@ -216,6 +230,21 @@ static void copy_metrics(const sim_t *s, int wave, const COMP *rx, double *ll, f
   double s2 = tmp[nn / 2] / M_LN2;
   free(tmp);
   if (s2 <= 0) s2 = 1e-12;
+  if (g_norm_bin) {
+    float *col = malloc(sizeof(float) * (size_t)s->nd);
+    for (int b = 0; b < M; b++) {
+      for (int q = 0; q < s->nd; q++) col[q] = pw_scratch[(size_t)s->dpos[q] * M + b];
+      qsort(col, (size_t)s->nd, sizeof(float), cmpf);
+      double sb = col[s->nd / 2] / M_LN2;
+      /* only bins well above the frame's noise are brought down: the median
+       * of 96 exponential samples scatters by about 15 %, and scaling every
+       * bin by its own scatter cost about 1 dB at the cliff (measured) */
+      if (sb <= 2.0 * s2) continue;
+      double f = s2 / sb;
+      for (int q = 0; q < nsym; q++) pw_scratch[(size_t)q * M + b] = (float)(pw_scratch[(size_t)q * M + b] * f);
+    }
+    free(col);
+  }
   if (g_norm_sym) {
     /* per-symbol noise level: the symbol's median bin; scale it to the
      * frame's level so the rest of the metric is unchanged */
@@ -383,7 +412,9 @@ int main(int argc, char **argv) {
   sim_t s;
   memset(&s, 0, sizeof(s));
   g_metric_awgn = getenv("DFS_METRIC") && !strcmp(getenv("DFS_METRIC"), "awgn");
-  g_norm_sym = getenv("DFS_NORM") && !strcmp(getenv("DFS_NORM"), "sym");
+  g_norm_sym = getenv("DFS_NORM") && (!strcmp(getenv("DFS_NORM"), "sym") || !strcmp(getenv("DFS_NORM"), "both"));
+  g_norm_bin = getenv("DFS_NORM") && (!strcmp(getenv("DFS_NORM"), "bin") || !strcmp(getenv("DFS_NORM"), "both"));
+  if (getenv("DFS_FSK")) sscanf(getenv("DFS_FSK"), "%lf,%lf,%lf,%lf", &g_fsk_hz, &g_fsk_db, &g_fsk_baud, &g_fsk_shift);
   g_sync_energy = getenv("DFS_SYNCSTAT") && !strcmp(getenv("DFS_SYNCSTAT"), "energy");
   if (getenv("DFS_SYNC_G")) g_sync_g = atof(getenv("DFS_SYNC_G"));
   if (getenv("DFS_IMP")) sscanf(getenv("DFS_IMP"), "%lf,%lf", &g_imp_rate, &g_imp_db);
@@ -514,6 +545,18 @@ int main(int argc, char **argv) {
           memset(buf, 0, sizeof(COMP) * (size_t)buflen);
           memcpy(buf + guard, tx, sizeof(COMP) * (size_t)fl);
           watterson_process(&wch, buf, buflen);
+          if (g_fsk_db > -900) {
+            double fa = sqrt(pow(10.0, g_fsk_db / 10.0)), ph = 2.0 * M_PI * uni(), f = g_fsk_hz;
+            long sym = -1;
+            for (int i = 0; i < buflen; i++) {
+              long ns = (long)floor((double)i * g_fsk_baud / FSB);
+              if (ns != sym) { sym = ns; f = g_fsk_hz + (uni() < 0.5 ? -0.5 : 0.5) * g_fsk_shift; }
+              buf[i].real += (float)(fa * cos(ph));
+              buf[i].imag += (float)(fa * sin(ph));
+              ph += 2.0 * M_PI * f / FSB;
+              if (ph > 2.0 * M_PI) ph -= 2.0 * M_PI;
+            }
+          }
           int imp_left = 0;
           double ia = sqrt(pow(10.0, g_imp_db / 10.0) / 2.0); /* per component, unit signal power */
           for (int i = 0; i < buflen; i++) {

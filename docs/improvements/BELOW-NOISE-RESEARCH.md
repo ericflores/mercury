@@ -47,6 +47,10 @@ arithmetic or literature and says so. Nothing here is in the modem.
   shorter tones in fast fading; stochastic resonance, compressed sensing and
   a coherent pilot gain nothing over this receiver; time reversal needs a
   channel that holds still for the turnaround, which HF does not.
+- **The floor can share the band.** With each bin and then each symbol
+  divided by its own noise, the 256-tone floor at −16 dB still delivers 25
+  of 30 frames with an RTTY-like signal 20 dB over it inside its band
+  (0 of 30 without).
 - **Two things from other fields that did win:** a search metric that does
   not let one loud window decide (the radar M-of-N rule and LIGO's χ² veto
   in soft form: single-copy synchronisation from 35 of 40 to 40 of 40 at
@@ -138,6 +142,7 @@ already logs it).
 | Signal processing | compressed sensing, sparse recovery | — | does not apply (section 6) |
 | Underwater acoustics, medical ultrasound | time reversal: send back the received channel reversed so it focuses at the other end | — | does not apply on HF (section 6) |
 | Power-line communication | robust metrics for impulsive noise | per-symbol normalisation (above) and the blanker (proposal 08) | measured (4.6) |
+| DSL bit loading, proposal 07 | treat each frequency by its own noise | each bin divided by its own median over the frame, against a foreign signal in the band | **measured, won** with the per-symbol step (4.7) |
 
 ## 4. Measured: `utils/deep_floor_sim`
 
@@ -307,6 +312,37 @@ Without impulses it costs about 0.2 dB (−17.6 → −17.4 dB at 50 %). In the
 modem the blanker of proposal 08 would act first; this is the metric's own
 safety net, and a candidate for the MFSK floor's receiver today.
 
+### 4.7 Someone else's narrow signal inside the floor's band
+
+A shared band has other signals in it. An RTTY-like signal (two-tone FSK,
+45 baud, 170 Hz shift) 300 Hz from the centre of the 256-tone band, its
+level relative to the floor's whole power, white noise. Its tones are
+louder than the floor's in every symbol, so the receiver takes them for
+the transmitted symbol. Each bin divided by its own median over the frame
+(the noise-aware weights of proposal 07, applied to the floor; only bins
+more than 3 dB over the frame's noise are touched, because scaling every
+bin by the scatter of a 96-sample median cost about 1 dB at the cliff),
+then each symbol by its own median (4.6). Frames of 30, at −16 / −14 /
+−12 dB:
+
+| foreign signal | as received | per bin | per symbol | per bin, then per symbol |
+|---|---|---|---|---|
+| level with the floor | 30 / 30 / 30 | 30 / 30 / 30 | | 30 / 30 / 30 |
+| 10 dB over | 0 / 0 / 0 | 0 / 2 / 15 | 0 / 0 / 0 | **29 / 30 / 30** |
+| 20 dB over | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | **25 / 30 / 30** |
+| 30 dB over | 0 / 0 / 0 | 0 / 0 / 0 | | **0 / 24 / 30** |
+
+Neither normalisation alone is enough; the two together keep the floor
+working under a foreign signal 20 dB over it, which costs the code only a
+few of its 256 tones. Without a foreign signal they change nothing
+(7, 25, 39, 40 of 40 at −18, −17.5, −17, −16.5 dB with and without).
+Chirps with the RAKE did worse here than without any foreign signal and
+were not rescued by the same normalisation (at 10 dB over: 10 / 14 / 1 of
+30 as received, 4 / 11 / 0 normalised; nothing at 20 dB): dechirping
+spreads the foreign signal over every bin, and in this receiver it also
+upsets the path profile measured on the preamble. Another point against
+chirps for the floor.
+
 ## 5. Where this leaves the floor, honestly
 
 - **At the same bit rate, about the same as today.** 128 tones at 31.8
@@ -399,6 +435,8 @@ cd utils
 ./deep_floor_sim fsk,cssr 128 H_256_768_22 ccir-flutter -18 0 2 30
 # copies, and the search per copy and integrated (last two arguments)
 ./deep_floor_sim fsk 256 H_256_768_22 ccir-poor -28 -14 1 40 4 1
+# a foreign RTTY-like signal 20 dB over the floor, with both normalisations
+DFS_FSK=300,20 DFS_NORM=both ./deep_floor_sim fsk 256 H_256_768_22 awgn -16 -12 2 30
 # the old search metric, known symbols spread, impulses with per-symbol normalisation
 DFS_SYNCSTAT=energy ./deep_floor_sim fsk 256 H_256_768_22 ccir-poor -20 -12 2 40 1 1
 DFS_SYNC=spread ./deep_floor_sim fsk 256 H_256_768_22 ccir-poor -22 -12 1 40 1 1

@@ -42,6 +42,9 @@ knows when the copies come.
   per-symbol noise normalisation (`g_norm_sym`; strong impulses 0 → 30 of
   30 at −10 dB, 0.2 dB of cost without them); known symbols spread over the
   frame (a small gain in finding a single copy).
+- Measured: under an RTTY-like signal inside the band 20 dB over the floor,
+  each bin then each symbol divided by its own median keeps 25 of 30 frames
+  at −16 dB (0 of 30 without; research note 4.7). The receiver needs both.
 - Measured and rejected: chirps (0.5 to 1.5 dB worse than tones in slow
   fading even with an ideal RAKE); a long rate-1/2 code (2 dB worse under
   fading).
@@ -78,7 +81,8 @@ knows when the copies come.
 - Frame: known symbols in three groups (start, middle, end), the codeword
   interleaved over the frame, a CRC16 seeded with the session as every
   frame is.
-- Receiver: the bounded search metric; per-symbol normalisation; the
+- Receiver: the bounded search metric; per-bin then per-symbol
+  normalisation; the
   fading-channel symbol metric; log-sum-exp bit LLRs.
 - In the pool and the timing table like MFSK; a capability bit; the ladder
   goes below MFSK only when both ends have it.

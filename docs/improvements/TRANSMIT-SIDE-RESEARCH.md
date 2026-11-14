@@ -536,6 +536,35 @@ carries 3100 bit/s inside a burst and about 2160 bit/s over a whole round
 6 dB for 64QAM, from the literature) and a transmitter linear enough to
 show it.
 
+## 6a. Considered and not measured
+
+Ideas on the transmit side that came up and were not taken to the bench.
+None is proposed; each has the measurement that would decide it.
+
+- **Pilots sent stronger than data.** It would help where the channel
+  estimate is the limit (the stock receiver near its cliff) and cost the
+  data its share of the power. Proposals 09 and 19 already recover about
+  2 dB of that limit at the receiver for nothing, so the room is small.
+  Decided by: `rx_bench` with a pilot gain in the custom configuration.
+- **A narrow rung with its carriers spread over the passband** instead of
+  side by side: three or four carriers 500 Hz apart fade independently on
+  a channel with 2 ms of delay, where today a 187 Hz signal sits wholly
+  inside a null from time to time. The gain is diversity under slow
+  selective fading; the cost is a wider footprint for the same data, the
+  opposite of what proposal 16 wants. Decided by: a bench variant with
+  non-adjacent carriers on CCIR Good and Poor.
+- **More bits on the carriers that are strong** (bit loading from a
+  per-carrier report). The receiver's report would be a round old; at
+  1 Hz of Doppler the channel has changed by then. The hole of section 4
+  is the one-bit version that survives, because a foreign signal stays
+  where it is for minutes. Decided by: how long a carrier stays strong on
+  recordings from the air.
+- **Two Mercury links on one frequency told apart by strength**: the
+  receiver decodes the stronger, rebuilds it from the decoded bits and the
+  estimated channel, subtracts it, and decodes the weaker. The rebuilding
+  is what proposal 20's machinery does. It needs the two signals several
+  dB apart and a channel estimate good to 15 or 20 dB. Research only.
+
 ## 7. Changes that would break compatibility, and why none is proposed
 
 - **A single-carrier waveform with an equaliser** (as PACTOR-4 and the

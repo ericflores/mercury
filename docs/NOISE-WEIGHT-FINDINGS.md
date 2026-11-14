@@ -197,7 +197,7 @@ decode, on a frame that failed while a carrier stood out.
   a 6 Hz slice; no loss was measurable in these tables.
 - False accepts: the weighted attempt is one more chance at the CRC behind
   the parity gate; the noise-only and wrong-session controls are in
-  `docs/INTEGRATION-AB-FINDINGS.md` when run.
+  `docs/INTEGRATION-AB-FINDINGS.md`: none accepted.
 - Not built: per-frame (time) weights, the gap noise profile,
   decode-and-subtract.
 

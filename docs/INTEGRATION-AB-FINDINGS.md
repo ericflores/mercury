@@ -18,6 +18,9 @@ lose a frame the stock receiver decodes, on the audio of a real session?
 - **No frame is lost.** On recordings of what the stations heard during ten
   sessions, decoded again offline by both receivers, the switches gained 76
   frames and lost 0.
+- **No wrong frame is accepted.** With every switch on, the bench accepted
+  no frame out of noise (9900 trials) and none of 3178 bursts of another
+  session; neither did the stock receiver.
 - **Where the channel is the problem, sessions finish several times
   sooner**; where it is not, nothing changes:
 
@@ -171,6 +174,47 @@ both configurations of seed 3 had.
 
 "No connection": the test gave up after 110 s without a CONNECTED.
 
+## False-accept controls (bench)
+
+Every optional attempt is one more chance for a wrong frame to pass the
+CRC. Two controls, stock against every receiver switch at once
+(`t4f3+cp4+pt+nw+dd+nt+b8+es`; `t4+cp4+nw+dd+nt+b8+es` for the modes under
+nine carriers), `utils/rx_bench`. A frame "delivered" here is a false
+accept.
+
+**Noise only** (no burst at all; channel `noise`): frames accepted, stock
+and all, of the trials given.
+
+| input | trials | acquired (stock / all) | accepted (stock / all) |
+|---|---|---|---|
+| DATAC1, DATAC3, DATAC17, QAM16C2, DATAC4: white noise | 1000 each | 0 / 0 | **0 / 0** |
+| DATAC15: white noise | 1000 | 1 / 1 | **0 / 0** |
+| DATAC16 (control): white noise | 1000 | 2 / 2 | **0 / 0** |
+| DATAC1: noise and a carrier on 1650 Hz at the noise's power | 300 | 0 / 0 | **0 / 0** |
+| DATAC16: noise and a carrier on 1500 Hz | 300 | 0 / 1 | **0 / 0** |
+| DATAC1: noise and five impulses a second 25 dB over it | 300 | 0 / 0 | **0 / 0** |
+
+Noise alone hardly ever reaches a decode attempt, so this control says
+little about the attempts themselves. The next one does.
+
+**Another session's frames** (`RX_BENCH_WRONG_SEED=1`: real bursts, at and
+above each mode's cliff, whose CRC the receivers must refuse because they
+expect a session-seeded one). Every acquired burst runs the stock decode
+and, with the switches on, every fallback attempt.
+
+| mode, channel, levels | acquired | accepted (stock / all) |
+|---|---|---|
+| DATAC1, white noise, −1 and +1 dB | 600 | **0 / 0** |
+| DATAC3, white noise, −6 and −4 dB | 299 | **0 / 0** |
+| DATAC15, white noise, −13 and −11 dB | 347 | **0 / 0** |
+| DATAC16, white noise, −11 and −9 dB | 548 | **0 / 0** |
+| DATAC17, white noise, 0 and +2 dB | 300 | **0 / 0** |
+| QAM16C2, white noise, +6 and +8 dB | 300 | **0 / 0** |
+| DATAC1, CCIR Poor, +6.0 and +2.0 dB | 389 | **0 / 0** |
+| DATAC1, disturbed NVIS, +8.0 and +4.0 dB | 395 | **0 / 0** |
+
+3178 bursts of another session, none accepted by either receiver.
+
 ## The harness race
 
 The test writes the payload about a second after it reads CONNECTED, and
@@ -197,14 +241,13 @@ counts is the replay of recordings. Handbook pitfall 19.
 - The sessions with the blanker used a threshold of 6; the recommended
   value is now 8 (`docs/BLANKER-FINDINGS.md`), which `MERCURY_RX_ALL` uses
   from the NVIS seeds 11-16 on.
-- False-accept controls (noise only, another session's frames) are bench
-  runs: `utils/rx_bench` with channel `noise` and `RX_BENCH_WRONG_SEED=1`.
-  Their results are added to this document when run.
+- The false-accept controls are bench runs, not sessions, and 3178 bursts
+  bound a false-accept rate only to about one in a thousand.
 
 ## Reproducing
 
 ```sh
-make && make -C utils rx_replay watterson_test
+make && make -C utils rx_replay rx_bench watterson_test
 cd tests/integration
 E="MERCURY_CH_ENGINE=watterson MERCURY_TEST_TRANSPORT=sock MERCURY_TEST_PAYLOAD_RANDOM=1 MERCURY_TEST_SEED=3"
 # disturbed NVIS at +10 dB, 2 KB, off and on, with recordings
@@ -221,4 +264,7 @@ seed=$(grep -ho 'session CRC seed 0x[0-9a-f]*' /tmp/off/*.timing.log | head -1 |
 # a carrier 10 dB over the signal
 env $E MERCURY_CH_NO=-45 MERCURY_CH_GAIN=0.3 MERCURY_CH_TONE=1625,-10 MERCURY_TEST_PAYLOAD_B=600 \
     MERCURY_NOTCH=1 go test -count=1 -run '^TestMercuryARQTransfer$' -v ./...
+# false-accept controls: every "delivered" frame is a false accept
+(cd ../../utils && ./rx_bench DATAC1 1000 0 0 1 noise stock,t4f3+cp4+pt+nw+dd+nt+b8+es)
+(cd ../../utils && RX_BENCH_WRONG_SEED=1 ./rx_bench DATAC1 300 -1 1 2 awgn stock,t4f3+cp4+pt+nw+dd+nt+b8+es)
 ```

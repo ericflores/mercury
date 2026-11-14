@@ -207,6 +207,18 @@ rx_noise_weight = false
 ; data.  MERCURY_BLANKER=<k> overrides it.
 rx_blanker = 0
 
+; Clip the top rung (QAM16C2) on transmit (issue #2).  It is the only OFDM
+; mode sent unclipped: its peaks are 11.6 dB over its average power, against
+; about 7 dB for the rung below, so a transmitter set by its peaks (every SSB
+; radio) radiates 4-5 dB less average power on it and the rung is reached
+; later than it could be.  true applies the one setting that was measured
+; (drive 2.0, gain 1.0): same peak, 4.9 dB more average power.  Transmit side
+; only: any Mercury receiver decodes it, clipped or not.  true or false
+; (default false).  Bench-measured (docs/CLIPPED-QAM16C2-FINDINGS.md); what a
+; real transmitter's ALC and final do to it has not been tried on the air.
+; MERCURY_QAM16C2_CLIP=1 overrides it.
+qam16c2_tx_clip = false
+
 ; TX keying delay in milliseconds (default: 10), waited after PTT ON before
 ; audio is written to the playback device on TX. The default covers the
 ; local radio relay's switch time. Increase this if your host app drives

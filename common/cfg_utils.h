@@ -74,6 +74,7 @@
 #define CFG_KEY_RX_PROFILE_TRACK    "audio:rx_profile_track"
 #define CFG_KEY_RX_NOISE_WEIGHT     "audio:rx_noise_weight"
 #define CFG_KEY_RX_BLANKER          "audio:rx_blanker"
+#define CFG_KEY_QAM16C2_TX_CLIP     "audio:qam16c2_tx_clip"
 #define CFG_KEY_TNC_KEEPALIVE_S     "tnc:keepalive_s"
 #define CFG_KEY_TNC_BUFFER_REPORT_MS "tnc:buffer_report_ms"
 #define CFG_KEY_ARQ_RETRY_STAGGER_MS          "arq:retry_stagger_ms"
@@ -160,6 +161,9 @@ typedef struct {
     float    rx_blanker;            /* Impulse blanker threshold on the captured
                                     * audio (issue #8): 0 off (default), else
                                     * 1..100; 6 is the recommended value. */
+    bool     qam16c2_tx_clip;       /* Clip QAM16C2 on transmit at the measured
+                                    * setting (issue #2).  false (default)
+                                    * sends it as it has always been sent. */
     float    tx_gain_db;            /* Linear-equivalent gain on the modulator
                                     * TX samples, in dB. 0.0 = no change.
                                     * Range -20.0 .. +20.0 (clamped). */

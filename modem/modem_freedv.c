@@ -121,6 +121,29 @@ static int noise_weight_setting(void)
     return e[0] == '1';
 }
 
+/* QAM16C2 transmit clipping (docs/improvements/02): the top rung leaves the
+ * transmitter with a peak-to-average ratio of 11.4 dB, 4.4 dB more than the
+ * rung below, so a radio set by its peaks radiates that much less average
+ * power on it.  The measured clip setting brings it to 6.7 dB.  Transmit
+ * side only; any receiver decodes it.  OFF unless asked for:
+ * audio:qam16c2_tx_clip in the ini (modem_freedv_set_qam16c2_clip(), before
+ * the instances are opened) or MERCURY_QAM16C2_CLIP=1, which wins when set
+ * (any other value switches it off). */
+static int g_qam16c2_clip = 0;
+
+void modem_freedv_set_qam16c2_clip(int on)
+{
+    g_qam16c2_clip = on ? 1 : 0;
+}
+
+static int qam16c2_clip_setting(void)
+{
+    const char *e = getenv("MERCURY_QAM16C2_CLIP");
+    if (!e || !*e)
+        return g_qam16c2_clip;
+    return e[0] == '1';
+}
+
 static void *fdv_open(int mode)
 {
     /* FSK_LDPC needs an advanced open (was open_freedv_mode_locked in modem.c).
@@ -138,6 +161,8 @@ static void *fdv_open(int mode)
         freedv_set_cp_recycle(f, cp_recycle_setting());
         freedv_set_profile_track(f, profile_track_setting());
         freedv_set_noise_weight(f, noise_weight_setting());
+        if (mode == FREEDV_MODE_QAM16C2 && qam16c2_clip_setting())
+            freedv_set_qam16c2_tx_clip(f, 1);
     }
     return f;
 }

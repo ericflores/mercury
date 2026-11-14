@@ -25,6 +25,10 @@ void modem_freedv_set_chanest(int mode);
  * MERCURY_CP_RECYCLE when that is set. */
 void modem_freedv_set_cp_recycle(int guard_samples);
 
+/* QAM16C2 transmit clipping for instances opened from now on: 0 = off
+ * (default), 1 = on.  Overridden by MERCURY_QAM16C2_CLIP when that is set. */
+void modem_freedv_set_qam16c2_clip(int on);
+
 /* Noise-aware soft bits for instances opened from now on: 0 = off (default),
  * 1 = on.  Overridden by MERCURY_NOISE_WEIGHT when that is set. */
 void modem_freedv_set_noise_weight(int on);

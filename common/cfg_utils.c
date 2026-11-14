@@ -71,6 +71,7 @@ void cfg_set_defaults(mercury_config *cfg)
     cfg->rx_profile_track      = false;
     cfg->rx_noise_weight       = false;
     cfg->rx_blanker            = 0.0f;
+    cfg->qam16c2_tx_clip       = false;
     cfg->tx_delay_ms           = 10;
     cfg->retry_stagger_ms            = ARQ_RETRY_STAGGER_MS_DEFAULT;
     cfg->silence_fallback_s          = ARQ_SILENCE_FALLBACK_S_DEFAULT;
@@ -481,6 +482,8 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
     cfg->rx_noise_weight = (bool) b;
     d = iniparser_getdouble(ini, CFG_KEY_RX_BLANKER, (double)cfg->rx_blanker);
     if (d == 0.0 || (d >= 1.0 && d <= 100.0)) cfg->rx_blanker = (float)d;
+    b = iniparser_getboolean(ini, CFG_KEY_QAM16C2_TX_CLIP, cfg->qam16c2_tx_clip ? 1 : 0);
+    cfg->qam16c2_tx_clip = (bool) b;
 
     i = iniparser_getint(ini, CFG_KEY_TX_DELAY_MS, cfg->tx_delay_ms);
     if (i >= 0 && i <= 2000) cfg->tx_delay_ms = i;
@@ -631,6 +634,7 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
     fprintf(f, "rx_profile_track = %s\n", cfg->rx_profile_track ? "true" : "false");
     fprintf(f, "rx_noise_weight = %s\n", cfg->rx_noise_weight ? "true" : "false");
     fprintf(f, "rx_blanker = %g\n", (double)cfg->rx_blanker);
+    fprintf(f, "qam16c2_tx_clip = %s\n", cfg->qam16c2_tx_clip ? "true" : "false");
 
     fprintf(f, "\n[tnc]\n");
     fprintf(f, "keepalive_s = %d\n", cfg->tnc_keepalive_s);

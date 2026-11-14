@@ -236,7 +236,9 @@ rx_notch = false
 ; 100 ms for DATAC1 and 230 ms for QAM16C2 on a desktop core, several times
 ; that on a Raspberry Pi), and each optional decode attempt above pays it
 ; again.  With this on, a decode whose count of satisfied parity checks has
-; not improved for 10 iterations and sits below 80 % is stopped.  It makes
+; not improved for 10 iterations and sits below 80 % is stopped (on the long
+; codes of DATAC1, DATAC17 and QAM16C2 only: on the short ones the rule lost
+; frames).  It makes
 ; the receiver cheaper, not better: use it with the attempts above on a slow
 ; machine.  true or false (default false).  Bench-measured only
 ; (docs/RX-EFFORT-FINDINGS.md).  OFDM modes only; the MFSK floor has its own

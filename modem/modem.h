@@ -98,6 +98,12 @@ float modem_get_tx_gain(void);
 void modem_set_tx_delay_ms(int delay_ms);
 int  modem_get_tx_delay_ms(void);
 
+/* Impulse blanker on the captured audio, before every decoder: samples more
+ * than k times the tracked level that do not last are zeroed.  0 = off (the
+ * default); 6 is the recommended value.  Takes effect when the receive
+ * thread starts.  MERCURY_BLANKER=<k> overrides it. */
+void modem_set_rx_blanker(float k);
+
 // Most recent TX burst peak amplitude in dBFS (0 dBFS = INT32 full-scale,
 // i.e. the clip ceiling).  Measured post-gain but pre-saturation, once per
 // burst, so a return value above 0 dBFS means the burst clipped by that many

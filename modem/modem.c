@@ -42,6 +42,7 @@
 #include "../datalink_broadcast/bcast_status.h"
 #include "../datalink_broadcast/kiss.h"     /* MAX_PAYLOAD */
 #include "channel_busy.h"
+#include "rx_blanker.h"
 #include "tx_pacing.h"
 #include "freedv_api.h"
 #include "modem_freedv.h"
@@ -185,6 +186,29 @@ void modem_set_tx_delay_ms(int delay_ms)
 int modem_get_tx_delay_ms(void)
 {
     return atomic_load(&g_tx_delay_ms);
+}
+
+/* Impulse blanker on the captured audio (docs/improvements/08): the
+ * threshold in hundredths, 0 = off (the default).  Read once, when the
+ * receive thread starts; MERCURY_BLANKER=<k> overrides the ini value. */
+static _Atomic int g_rx_blanker_k100 = 0;
+
+void modem_set_rx_blanker(float k)
+{
+    if (!(k > 0.0f))  k = 0.0f;
+    if (k > 100.0f)   k = 100.0f;
+    atomic_store(&g_rx_blanker_k100, (int)(k * 100.0f + 0.5f));
+}
+
+static float rx_blanker_setting(void)
+{
+    const char *e = getenv("MERCURY_BLANKER");
+    if (e && *e)
+    {
+        float k = (float)atof(e);
+        return k > 0.0f && k <= 100.0f ? k : 0.0f;
+    }
+    return (float)atomic_load(&g_rx_blanker_k100) / 100.0f;
 }
 
 float modem_get_tx_peak_dbfs(void)
@@ -3071,6 +3095,13 @@ void *rx_thread(void *g_modem)
     generic_modem_t *modem = (generic_modem_t *)g_modem;
     int32_t *capture_i32 = NULL;
     int16_t *capture_i16 = NULL;
+    /* Off (k = 0) it is never called, so the decoders get the captured audio
+     * bit for bit.  On, every plane gets the blanked audio, 8 ms later. */
+    rx_blanker_t blanker;
+    uint64_t blanker_mark_seen = 0, blanker_mark_blanked = 0;
+    rx_blanker_init(&blanker, rx_blanker_setting(), 8000);
+    if (blanker.k > 0.0f)
+        HLOGI("modem-rx", "impulse blanker on, threshold %.2f", (double)blanker.k);
     int capture_cap = 0;
     /* One worker per plane.  rx_thread keeps ownership of reading
      * capture_buffer, the flush policy and the spectrum/busy work; the workers
@@ -3441,6 +3472,24 @@ void *rx_thread(void *g_modem)
             capture_i16[i] = (int16_t)(capture_i32[i] >> 16);
         }
         rx_dump_chunk(capture_i16, chunk_samples);
+
+        /* After the dump, so a recording stays raw and the blanker can be
+         * tried on it offline (utils/rx_replay); before the tee, so every
+         * plane gets the same audio. */
+        if (blanker.k > 0.0f)
+        {
+            rx_blanker_process(&blanker, capture_i16, chunk_samples);
+            if (blanker.seen - blanker_mark_seen >= 10u * 8000u)
+            {
+                uint64_t nb = blanker.blanked - blanker_mark_blanked;
+                if (nb)
+                    HLOGI("modem-rx", "blanker: %.3f %% of the last 10 s blanked (%llu impulses so far)",
+                          100.0 * (double)nb / (double)(blanker.seen - blanker_mark_seen),
+                          (unsigned long long)blanker.impulses);
+                blanker_mark_seen = blanker.seen;
+                blanker_mark_blanked = blanker.blanked;
+            }
+        }
 
         /* Tee the chunk to both planes.  A worker that has fallen behind
          * overflows its own ring: drop there and log, never block the

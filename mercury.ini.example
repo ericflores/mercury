@@ -194,6 +194,19 @@ rx_profile_track = false
 ; while a carrier stood out.  MERCURY_NOISE_WEIGHT=1 overrides it.
 rx_noise_weight = false
 
+; Impulse blanker on the received audio, before every decoder (issue #8): for
+; short, strong noise bursts (ignition, switching supplies, electric fences,
+; static clicks), which spread over every carrier of the symbols they land in.
+; A sample more than this many times the tracked level of the audio is zeroed,
+; with what follows it, unless the rise lasts (a burst arriving, a long
+; crash).  0 = off (default); 6 is the recommended value; lower values start
+; to cut the signal's own peaks.  Receiver only.  The audio reaches the
+; decoders 8 ms later when it is on.  Bench-measured only
+; (docs/BLANKER-FINDINGS.md); not yet tried on the air: real static arrives
+; shaped by the radio's filter and AGC.  Use fast or no AGC on the radio for
+; data.  MERCURY_BLANKER=<k> overrides it.
+rx_blanker = 0
+
 ; TX keying delay in milliseconds (default: 10), waited after PTT ON before
 ; audio is written to the playback device on TX. The default covers the
 ; local radio relay's switch time. Increase this if your host app drives

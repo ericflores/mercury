@@ -73,6 +73,7 @@
 #define CFG_KEY_RX_CP_RECYCLE       "audio:rx_cp_recycle"
 #define CFG_KEY_RX_PROFILE_TRACK    "audio:rx_profile_track"
 #define CFG_KEY_RX_NOISE_WEIGHT     "audio:rx_noise_weight"
+#define CFG_KEY_RX_BLANKER          "audio:rx_blanker"
 #define CFG_KEY_TNC_KEEPALIVE_S     "tnc:keepalive_s"
 #define CFG_KEY_TNC_BUFFER_REPORT_MS "tnc:buffer_report_ms"
 #define CFG_KEY_ARQ_RETRY_STAGGER_MS          "arq:retry_stagger_ms"
@@ -156,6 +157,9 @@ typedef struct {
                                     * bits of carriers the pilots show to be
                                     * interfered scaled down (issue #7).
                                     * false (default) off. */
+    float    rx_blanker;            /* Impulse blanker threshold on the captured
+                                    * audio (issue #8): 0 off (default), else
+                                    * 1..100; 6 is the recommended value. */
     float    tx_gain_db;            /* Linear-equivalent gain on the modulator
                                     * TX samples, in dB. 0.0 = no change.
                                     * Range -20.0 .. +20.0 (clamped). */

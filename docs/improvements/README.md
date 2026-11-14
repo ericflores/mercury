@@ -25,7 +25,7 @@ first.
 | 8 | [20-decision-directed.md](20-decision-directed.md) | #20 | receiver only | 09, 19, 23 | first phase implemented behind `MERCURY_DD`, findings in `docs/DECISION-DIRECTED-FINDINGS.md`; the genie as a bench variant, the NVIS phase to do |
 | 9 | [03-directed-acquisition.md](03-directed-acquisition.md) | #3 | receiver only | 00 | not measured |
 | 10 | [21-full-frame-acquisition.md](21-full-frame-acquisition.md) | #21 | receiver only | 00; complements 03 | arithmetic only |
-| 11 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | first part implemented behind `MERCURY_CHANSTATS` (a line per packet: mode, ok, path, SNR, offset, parity, iterations, noisiest carrier); Doppler, delay, EVM, gap statistics, classification to do |
+| 11 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | implemented behind `MERCURY_CHANSTATS` (a line per packet: mode, ok, path, SNR, offset, parity, iterations, noisiest carrier, Doppler, delay, EVM, first classification), findings in `docs/CHANSTATS-FINDINGS.md`: AWGN, tone, flutter and a clipped transmitter named in 97-100 % of frames, the 7 ms disturbed NVIS case is not detected; gap statistics, blanker fraction, round line, status snapshot, `onair_logs.py` to do |
 | 12 | [06-mfsk-metrics.md](06-mfsk-metrics.md) | #6 | receiver only | 00 | not measured |
 | 13 | [05-apriori-redecode.md](05-apriori-redecode.md) | #5 | receiver only | 09 (fallback path) | not measured |
 | 14 | [12-osd.md](12-osd.md) | #12 | receiver only | nothing | not measured |

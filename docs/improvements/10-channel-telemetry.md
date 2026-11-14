@@ -126,6 +126,39 @@ contradicting SNR should cap the ladder"). Judge it on the NVIS sim channels
 - `nvpk` / `nvhz` come from proposal 07's noise profile (noisiest carrier
   over the median, and its audio frequency); `freedv_set_noise_stats()`
   keeps the profile without the weighted attempt.
-- Not built: `dopp`, `dly`, `evm`, `evm_excess`, the gap statistics, the
-  per-round line, the status snapshot, the classification, the
-  `onair_logs.py` summary.
+## As built, second part (2026-11-14)
+
+Findings, tables and caveats: `docs/CHANSTATS-FINDINGS.md`.
+
+- `dopp` (Hz) and `dly` (ms) from the pilot rows, `evm` and `evm_excess` (dB)
+  from the data symbols, accumulated per burst in `ofdm.c`
+  (`ofdm_chan_acc_*`, only with the noise statistics on, never in a profile
+  replay), in `struct freedv_rx_frame_stats` with `evm_noise_db`,
+  `evm_floor_db`, `evm_resid_db`, `cp_ms` and `chan_valid`. The `chanstats:`
+  line gains, at the end, `dopp= dly= evm= evmx= evmr= limit=`.
+- The estimators differ from the table above where it was not enough: `dopp`
+  is the lag-2 / lag-1 pilot correlation ratio to the 1/3 (noise-free), with
+  a lag-1 fallback that saturates at 8.8 Hz; `dly` is the two-path
+  separation from the adjacent-carrier correlations at lags 1 and 2 with the
+  burst's phase slope removed; the noise of `evm_excess` is the smaller of
+  the time and the frequency second differences.
+- **Finding: `evm_excess` as specified is not near 0 dB on AWGN with the stock
+  transmitter.** The Hilbert clipper leaves a floor (DATAC1 -12.9 dB EVM), so
+  it reads 3.5 dB at SNR3k 13 and 17.7 at 30; with the clipper off it is 0 to
+  0.5 dB at every SNR. The classification reads `evm_resid`, the excess over
+  noise plus the mode's measured floor (table in `freedv_api.c`).
+- `modem/chan_classify.{c,h}`: the first classification as a pure function,
+  `limit=<name>` on the line. Skipped for lack of fields: `blank` and
+  `gap_kurt` (rule 1), `gap_peaks` (the gap half of rule 2). Calibrations:
+  "flat" is `dly` under 1 ms; rule 5 reads the SNR the pilots' noise implies,
+  not the modem's estimate, which the distortion itself drags down.
+- Measured on DATAC1 at 10 dB over its rung: AWGN, tone, flutter and a
+  harder clipper are named correctly in 97 to 100 % of the frames that reach
+  a result; **the 7 ms disturbed NVIS channel is not detected** (called
+  noise: the ISI hits the pilots as it hits the data, and `dly` reads a
+  median of 0 ms there). `dopp` does not separate 0.1 from 0.5 Hz or 5 from
+  10 Hz.
+- Tools: `utils/chanstats_bench`; tests: `tests/modem/test_chanstats.c`.
+- Not built: the gap statistics, the blanker's fraction, the per-round line,
+  the status snapshot, the `onair_logs.py` summary, on-air collection. A way
+  to see ISI beyond the prefix is open.

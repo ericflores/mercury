@@ -8,7 +8,7 @@ from codec2 with local changes, and a receiver-driven, erasure-coded ARQ
 
 An improvement programme tracked in GitHub issue #1 of this fork: independent
 proposals plus the bench tooling they share, one sub-issue each (#2 to #17
-and #19 to #26). The working specifications are in the repository:
+and #19 to #27). The working specifications are in the repository:
 
 1. **`docs/improvements/README.md`**: the handbook. Read it first: order of
    work, the four rules, repository map, build and test commands, how to add

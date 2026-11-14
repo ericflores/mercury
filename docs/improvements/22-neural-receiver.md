@@ -16,6 +16,10 @@ Read `COMPUTE-AND-NEURAL-RESEARCH.md` section 5 first: what exists in the
 literature, and the boundary (a network models the channel and the noise;
 it cannot predict payload bits).
 
+A different use of a trained model, outside the data path, is proposal 27:
+it names what is degrading the signal and chooses among the receiver's
+existing tools. It is much smaller and is judged differently.
+
 ## What "winning" means
 
 The yardsticks are already measured (research note 3.2):

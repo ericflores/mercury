@@ -31,13 +31,14 @@ first.
 | 14 | [12-osd.md](12-osd.md) | #12 | receiver only | nothing | not measured |
 | 15 | [11-diversity.md](11-diversity.md) | #11 | receiver only, needs hardware | nothing | not measured |
 | 16 | [22-neural-receiver.md](22-neural-receiver.md) | #22 | research (GPU for training) | 00, 20 as the baseline to beat | not started; yardsticks measured |
-| 17 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream |
-| 18 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
-| 19 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
-| 20 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
-| 21 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
-| 22 | [24-qsy.md](24-qsy.md) | #24 | wire change, radio control | capability negotiation, busy detector, 10 | design only |
-| 23 | [25-vhf-uhf.md](25-vhf-uhf.md) | #25 | new modes and link timings | 00 (FM and wideband channel models), 15, 14, 23 | design only; **on hold** until the owner has radios fit to test with (do not start it) |
+| 17 | [27-impairment-classifier.md](27-impairment-classifier.md) | #27 | research (GPU for training); receiver only if it wins | 10 (features and the rules to beat), 00, 23; 07 and 08 for most of its actions | not started; design only |
+| 18 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream |
+| 19 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
+| 20 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
+| 21 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
+| 22 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
+| 23 | [24-qsy.md](24-qsy.md) | #24 | wire change, radio control | capability negotiation, busy detector, 10 | design only |
+| 24 | [25-vhf-uhf.md](25-vhf-uhf.md) | #25 | new modes and link timings | 00 (FM and wideband channel models), 15, 14, 23 | design only; **on hold** until the owner has radios fit to test with (do not start it) |
 
 Update the status column and tick the task list in the issue as work lands.
 

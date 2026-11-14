@@ -75,6 +75,10 @@ Order matters; first match wins:
 
 Thresholds are starting points; calibrate them on the presets.
 
+Proposal 27 takes this classification as the baseline a trained decision
+model has to beat, and adds the questions thresholds answer badly (which
+kind of interferer, will the rung hold).
+
 ## Steps
 
 1. Estimators for `dopp` and `dly`; validate against every Watterson preset

@@ -75,6 +75,7 @@ void cfg_set_defaults(mercury_config *cfg)
     cfg->rx_early_stop         = false;
     cfg->rx_decision_directed  = false;
     cfg->chanstats             = false;
+    cfg->rx_improvements       = false;
     cfg->qam16c2_tx_clip       = false;
     cfg->tx_delay_ms           = 10;
     cfg->retry_stagger_ms            = ARQ_RETRY_STAGGER_MS_DEFAULT;
@@ -490,6 +491,8 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
     cfg->rx_notch = (bool) b;
     b = iniparser_getboolean(ini, CFG_KEY_RX_EARLY_STOP, cfg->rx_early_stop ? 1 : 0);
     cfg->rx_early_stop = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_RX_IMPROVEMENTS, cfg->rx_improvements ? 1 : 0);
+    cfg->rx_improvements = (bool) b;
     b = iniparser_getboolean(ini, CFG_KEY_CHANSTATS, cfg->chanstats ? 1 : 0);
     cfg->chanstats = (bool) b;
     b = iniparser_getboolean(ini, CFG_KEY_RX_DECISION_DIRECTED, cfg->rx_decision_directed ? 1 : 0);
@@ -650,6 +653,7 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
     fprintf(f, "rx_notch = %s\n", cfg->rx_notch ? "true" : "false");
     fprintf(f, "rx_early_stop = %s\n", cfg->rx_early_stop ? "true" : "false");
     fprintf(f, "rx_decision_directed = %s\n", cfg->rx_decision_directed ? "true" : "false");
+    fprintf(f, "rx_improvements = %s\n", cfg->rx_improvements ? "true" : "false");
     fprintf(f, "qam16c2_tx_clip = %s\n", cfg->qam16c2_tx_clip ? "true" : "false");
 
     fprintf(f, "\n[tnc]\n");

@@ -20,6 +20,14 @@ extern const modem_backend_t modem_backend_freedv;
  * MERCURY_CHANEST.  Off by default. */
 void modem_freedv_set_chanest(int mode);
 
+/* Every receiver-only improvement on at its recommended setting, for a
+ * trial: 0 = off (default).  Overridden by MERCURY_RX_ALL when that is set.
+ * A feature's own environment variable still decides for that feature.
+ * modem_freedv_rx_all() is the resolved value (the audio modules in modem.c
+ * follow it too). */
+void modem_freedv_set_rx_all(int on);
+int  modem_freedv_rx_all(void);
+
 /* Cyclic-prefix recycling for instances opened from now on: the guard in
  * samples at the head of the prefix, 0 = off (default).  Overridden by
  * MERCURY_CP_RECYCLE when that is set. */

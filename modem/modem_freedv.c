@@ -24,6 +24,24 @@
 #define CHANEST_AUTO (-1)
 static int g_chanest = OFDM_CHANEST_OFF;
 
+/* One switch for a trial: every receiver-only improvement on at its
+ * recommended setting (audio:rx_improvements in the ini,
+ * modem_freedv_set_rx_all(); MERCURY_RX_ALL=1 wins when set).  Each feature
+ * keeps its own switch: its environment variable, when set, still decides
+ * for that feature alone, on or off, and its ini key can switch it on
+ * without this.  Transmit-side switches are not part of it. */
+static int g_rx_all = 0;
+
+void modem_freedv_set_rx_all(int on) { g_rx_all = on ? 1 : 0; }
+
+int modem_freedv_rx_all(void)
+{
+    const char *e = getenv("MERCURY_RX_ALL");
+    if (e && *e)
+        return e[0] == '1';
+    return g_rx_all;
+}
+
 void modem_freedv_set_chanest(int mode) { g_chanest = mode; }
 
 /* The environment variable, when set, wins over the ini value: it is the
@@ -32,7 +50,8 @@ static int chanest_setting(void)
 {
     const char *e = getenv("MERCURY_CHANEST");
     if (!e || !*e)
-        return g_chanest;
+        return g_chanest != OFDM_CHANEST_OFF ? g_chanest
+             : modem_freedv_rx_all() ? CHANEST_AUTO : OFDM_CHANEST_OFF;
     return !strcmp(e, "auto") ? CHANEST_AUTO
          : !strcmp(e, "t4")   ? OFDM_CHANEST_T4
          : !strcmp(e, "t4f3") ? OFDM_CHANEST_T4F3
@@ -73,7 +92,7 @@ static int cp_recycle_setting(void)
 {
     const char *e = getenv("MERCURY_CP_RECYCLE");
     if (!e || !*e)
-        return g_cp_recycle;
+        return g_cp_recycle ? g_cp_recycle : modem_freedv_rx_all() ? 4 : 0;
     return atoi(e);
 }
 
@@ -95,7 +114,7 @@ static int profile_track_setting(void)
 {
     const char *e = getenv("MERCURY_PROFILE_TRACK");
     if (!e || !*e)
-        return g_profile_track;
+        return g_profile_track || modem_freedv_rx_all();
     return e[0] == '1';
 }
 
@@ -117,7 +136,7 @@ static int noise_weight_setting(void)
 {
     const char *e = getenv("MERCURY_NOISE_WEIGHT");
     if (!e || !*e)
-        return g_noise_weight;
+        return g_noise_weight || modem_freedv_rx_all();
     return e[0] == '1';
 }
 
@@ -163,7 +182,7 @@ static int early_stop_setting(void)
 {
     const char *e = getenv("MERCURY_RX_EARLY_STOP");
     if (!e || !*e)
-        return g_early_stop;
+        return g_early_stop || modem_freedv_rx_all();
     return e[0] == '1';
 }
 
@@ -184,7 +203,7 @@ static int decision_directed_setting(void)
 {
     const char *e = getenv("MERCURY_DD");
     if (!e || !*e)
-        return g_decision_directed;
+        return g_decision_directed || modem_freedv_rx_all();
     return e[0] == '1';
 }
 

@@ -254,6 +254,16 @@ rx_early_stop = false
 ; MERCURY_DD=1 overrides it.
 rx_decision_directed = false
 
+; For a trial: every receiver-only improvement above on at once, at its
+; recommended setting (rx_chanest auto, rx_cp_recycle 4, rx_profile_track,
+; rx_noise_weight, rx_decision_directed, rx_notch, rx_blanker 6,
+; rx_early_stop).  All of them are receiver-side: the station works with any
+; peer, and nothing it transmits changes.  Each key above can still switch
+; its feature on without this one, and a feature's environment variable set
+; to 0 switches that feature off even with this on.  true or false (default
+; false).  MERCURY_RX_ALL=1 overrides it.
+rx_improvements = false
+
 ; Clip the top rung (QAM16C2) on transmit (issue #2).  It is the only OFDM
 ; mode sent unclipped: its peaks are 11.6 dB over its average power, against
 ; about 7 dB for the rung below, so a transmitter set by its peaks (every SSB

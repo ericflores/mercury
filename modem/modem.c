@@ -217,7 +217,7 @@ static bool rx_notch_setting(void)
     const char *e = getenv("MERCURY_NOTCH");
     if (e && *e)
         return e[0] == '1';
-    return atomic_load(&g_rx_notch);
+    return atomic_load(&g_rx_notch) || modem_freedv_rx_all();
 }
 
 static float rx_blanker_setting(void)
@@ -228,7 +228,10 @@ static float rx_blanker_setting(void)
         float k = (float)atof(e);
         return k > 0.0f && k <= 100.0f ? k : 0.0f;
     }
-    return (float)atomic_load(&g_rx_blanker_k100) / 100.0f;
+    int k100 = atomic_load(&g_rx_blanker_k100);
+    if (!k100 && modem_freedv_rx_all())
+        k100 = 600; /* the recommended threshold */
+    return (float)k100 / 100.0f;
 }
 
 float modem_get_tx_peak_dbfs(void)

@@ -75,6 +75,7 @@
 #define CFG_KEY_RX_NOISE_WEIGHT     "audio:rx_noise_weight"
 #define CFG_KEY_RX_BLANKER          "audio:rx_blanker"
 #define CFG_KEY_RX_NOTCH            "audio:rx_notch"
+#define CFG_KEY_RX_IMPROVEMENTS     "audio:rx_improvements"
 #define CFG_KEY_CHANSTATS           "main:chanstats"
 #define CFG_KEY_RX_EARLY_STOP       "audio:rx_early_stop"
 #define CFG_KEY_RX_DECISION_DIRECTED "audio:rx_decision_directed"
@@ -168,6 +169,9 @@ typedef struct {
     bool     rx_notch;              /* Automatic notch for steady carriers on
                                     * the captured audio (issue #7).  false
                                     * (default) off. */
+    bool     rx_improvements;       /* Every receiver-only improvement on at
+                                    * its recommended setting, for a trial.
+                                    * false (default) off. */
     bool     chanstats;             /* One telemetry line in the timing log per
                                     * OFDM packet received (issue #10).
                                     * false (default) off. */

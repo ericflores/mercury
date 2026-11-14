@@ -220,7 +220,7 @@ static void test_reset_and_empty(void)
 static chan_class_in_t base(void)
 {
     chan_class_in_t in = {.snr_db = 20.0f, .thresh_db = 3.0f, .nv_peak_db = 2.0f, .have_spread = 1,
-                          .evm_resid_db = 0.0f, .dly_ms = 0.3f, .dopp_hz = 0.3f, .cp_ms = 6.0f,
+                          .evm_resid_db = 0.0f, .noise_evm_db = -20.0f, .dly_ms = 0.3f, .dopp_hz = 0.3f, .cp_ms = 6.0f,
                           .blank_frac = -1.0f, .gap_kurt = -1.0f, .gap_peaks = -1};
     return in;
 }
@@ -243,7 +243,11 @@ static void test_classify_rules(void)
     TEST_ASSERT_EQUAL_INT(CHAN_DOPPLER, chan_classify(&in));
     in = base(); in.evm_resid_db = 5.0f;
     TEST_ASSERT_EQUAL_INT(CHAN_TXDIST, chan_classify(&in));
-    in = base(); in.evm_resid_db = 5.0f; in.snr_db = 8.0f; /* below 12 dB: not the transmitter */
+    in = base(); in.evm_resid_db = 5.0f; in.noise_evm_db = -8.0f; /* the noise alone leaves 8 dB: not the transmitter */
+    TEST_ASSERT_EQUAL_INT(CHAN_CLEAN, chan_classify(&in));
+    in = base(); in.evm_resid_db = 5.0f; in.snr_db = 8.0f; /* the modem's own estimate, spoilt by the distortion: still the transmitter */
+    TEST_ASSERT_EQUAL_INT(CHAN_TXDIST, chan_classify(&in));
+    in = base(); in.evm_resid_db = 5.0f; in.noise_evm_db = -8.0f;
     TEST_ASSERT_EQUAL_INT(CHAN_CLEAN, chan_classify(&in));
     in = base(); in.snr_db = 4.0f;
     TEST_ASSERT_EQUAL_INT(CHAN_NOISE, chan_classify(&in));

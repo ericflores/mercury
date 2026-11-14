@@ -329,6 +329,7 @@ struct freedv_rx_frame_stats {
   float dly_ms;        /* delay spread, as the separation of two equal paths */
   float evm_db;        /* error of the equalised data symbols, dB under power */
   float evm_excess_db; /* evm_db over what the pilot noise alone predicts */
+  float evm_noise_db;  /* the EVM the pilot noise alone predicts */
   float evm_floor_db;  /* the mode's own transmitter floor (stock clipper) */
   float evm_resid_db;  /* evm_db over the noise and that floor together */
   float cp_ms;         /* the mode's cyclic prefix */

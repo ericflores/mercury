@@ -30,7 +30,12 @@ chan_class_t chan_classify(const chan_class_in_t *in)
     if (in->have_spread && in->evm_resid_db > CHAN_EXCESS_DB) {
         if (in->dly_ms > 0.5f * in->cp_ms) return CHAN_ISI;
         if (in->dopp_hz > CHAN_DOPP_HZ) return CHAN_DOPPLER;
-        if (in->dly_ms < CHAN_FLAT_MS && in->snr_db > CHAN_TXDIST_SNR_DB) return CHAN_TXDIST;
+        /* The proposal says "SNR > 12 dB".  The modem's SNR estimate is
+         * made from the very errors being explained: on a transmitter
+         * clipped hard it falls from 25 dB to 10 dB, and the rule could never
+         * fire (docs/CHANSTATS-FINDINGS.md).  The SNR the pilots' noise
+         * implies is not spoilt by it. */
+        if (in->dly_ms < CHAN_FLAT_MS && -in->noise_evm_db > CHAN_TXDIST_SNR_DB) return CHAN_TXDIST;
     }
 
     /* 6. Close to the rung's threshold: noise decides. */

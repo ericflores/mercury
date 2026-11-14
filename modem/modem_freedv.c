@@ -357,6 +357,7 @@ static int fdv_rawdata_rx(void *ctx, uint8_t *bytes_out, const int16_t *demod_in
                                   .nv_peak_db = fs.noise_peak_db,
                                   .have_spread = (fs.chan_valid & 7) == 7,
                                   .evm_resid_db = fs.evm_resid_db,
+                                  .noise_evm_db = fs.evm_noise_db,
                                   .dly_ms = fs.dly_ms,
                                   .dopp_hz = fs.dopp_hz,
                                   .cp_ms = fs.cp_ms,

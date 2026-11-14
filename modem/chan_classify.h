@@ -37,6 +37,9 @@ typedef struct {
     int have_spread;
     float evm_resid_db;   /* data-symbol error over the noise and the mode's own
                            * transmitter floor (freedv_rx_frame_stats.evm_resid_db) */
+    float noise_evm_db;   /* the EVM the pilot noise alone predicts: -noise_evm_db
+                           * is the symbol SNR without any distortion, where
+                           * snr_db (the modem's) is spoilt by it too */
     float dly_ms;
     float dopp_hz;
     float cp_ms;          /* the mode's cyclic prefix */
@@ -52,8 +55,8 @@ typedef struct {
 #define CHAN_NV_PEAK_DB      6.0f
 #define CHAN_EXCESS_DB       3.0f
 #define CHAN_DOPP_HZ         2.0f
-#define CHAN_FLAT_MS         0.5f
-#define CHAN_TXDIST_SNR_DB   12.0f
+#define CHAN_FLAT_MS         1.0f /* the proposal says 0.5; DATAC1 reads 0.3 on AWGN and 0.7 clipped hard */
+#define CHAN_TXDIST_SNR_DB   12.0f /* of the noise alone, see noise_evm_db */
 #define CHAN_NOISE_MARGIN_DB 3.0f
 
 chan_class_t chan_classify(const chan_class_in_t *in);

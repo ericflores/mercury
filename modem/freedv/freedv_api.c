@@ -1869,6 +1869,7 @@ int freedv_get_rx_frame_stats(struct freedv *f,
       if (err > 0.0f && pd > 0.0f && pred > 0.0f) {
         st->evm_db = 10.0f * log10f(err / pd);
         st->evm_excess_db = 10.0f * log10f(err / pred);
+        st->evm_noise_db = 10.0f * log10f(pred / pd);
         st->evm_floor_db = freedv_evm_floor_db(f->mode);
         st->evm_resid_db =
             10.0f * log10f(err / (pred + powf(10.0f, 0.1f * st->evm_floor_db) * pd));

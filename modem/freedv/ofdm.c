@@ -403,8 +403,11 @@ struct OFDM *ofdm_create(const struct OFDM_CONFIG *config) {
 
   ofdm->noise_weight = 0;
   ofdm->nv_n = 0;
+  ofdm->nv_dn = 0;
   ofdm->nv_carrier = CALLOC(ofdm->nc + 2, sizeof(float));
   assert(ofdm->nv_carrier != NULL);
+  ofdm->nv_data = CALLOC(ofdm->nc + 2, sizeof(float));
+  assert(ofdm->nv_data != NULL);
   ofdm->nv_frame = CALLOC(ofdm->np > 0 ? ofdm->np : 1, sizeof(float));
   assert(ofdm->nv_frame != NULL);
 
@@ -711,6 +714,7 @@ void ofdm_destroy(struct OFDM *ofdm) {
   FREE(ofdm->rx_np_cp);
   FREE(ofdm->rx_amp_cp);
   FREE(ofdm->nv_carrier);
+  FREE(ofdm->nv_data);
   FREE(ofdm->nv_frame);
   FREE(ofdm->aphase_est_pilot_log);
   FREE(ofdm->tx_uw_syms);
@@ -1880,9 +1884,10 @@ int ofdm_get_noise_weight(struct OFDM *ofdm) { return ofdm->noise_weight; }
 static void ofdm_noise_profile(struct OFDM *ofdm) {
   int nc = ofdm->nc;
   if (ofdm_frame_is_first(ofdm)) {
-    for (int i = 0; i < nc + 2; i++) ofdm->nv_carrier[i] = 0.0f;
+    for (int i = 0; i < nc + 2; i++) ofdm->nv_carrier[i] = ofdm->nv_data[i] = 0.0f;
     for (int i = 0; i < ofdm->np; i++) ofdm->nv_frame[i] = 0.0f;
     ofdm->nv_n = 0;
+    ofdm->nv_dn = 0;
     return;
   }
   float sum = 0.0f;
@@ -2006,6 +2011,43 @@ static void ofdm_chanest_alt(struct OFDM *ofdm, complex float **rows,
     aphase[i] = cargf(h);
     aamp[i] = cabsf(h);
   }
+}
+
+/* The data symbols' part of the noise profile: the squared distance of a
+ * phase-corrected symbol to the nearest constellation point at the carrier's
+ * estimated amplitude. */
+static float ofdm_noise_data_err(const struct OFDM *ofdm, complex float rx_corr,
+                                 float amp) {
+  if (ofdm->bps == 2) {
+    complex float r = rx_corr * cmplx(ROT45);
+    float s = amp * (float)M_SQRT1_2;
+    complex float ideal = (crealf(r) <= 0.0f ? -s : s) +
+                          (cimagf(r) <= 0.0f ? -s : s) * I;
+    return cnormf(r - ideal);
+  }
+  if (ofdm->bps == 4) {
+    complex float u = rx_corr / (amp + 1E-12f);
+    float best = 1E30f;
+    for (int q = 0; q < 16; q++) {
+      float d = cnormf(u - qam16[q]);
+      if (d < best) best = d;
+    }
+    return best * amp * amp;
+  }
+  return 0.0f;
+}
+
+/* The profile as the weights use it: per carrier (0-based, nc values), the
+ * larger of the pilot and the data measurements.  Returns 0 when there is
+ * none yet. */
+int ofdm_noise_profile_get(const struct OFDM *ofdm, float *v) {
+  if (!ofdm->noise_weight || ofdm->nv_n < 1 || ofdm->nv_dn < 1) return 0;
+  for (int c = 0; c < ofdm->nc; c++) {
+    float vp = ofdm->nv_carrier[c + 1] / ofdm->nv_n;
+    float vd = ofdm->nv_data[c + 1] / ofdm->nv_dn;
+    v[c] = vp > vd ? vp : vd;
+  }
+  return ofdm->nc;
 }
 
 static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
@@ -2480,6 +2522,8 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
        */
       ofdm->rx_amp[(rr * ofdm->nc) + (i - 1)] = aamp_est_pilot[i];
       sum_amp += aamp_est_pilot[i];
+      if (ofdm->noise_weight && !ofdm->pt_replay)
+        ofdm->nv_data[i] += ofdm_noise_data_err(ofdm, rx_corr, aamp_est_pilot[i]);
 
       if (ofdm->chanest_alt) {
         ofdm->rx_np_alt[(rr * ofdm->nc) + (i - 1)] =
@@ -2505,6 +2549,8 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
         rx_bits[bit_index++] = abit[ofdm->bps - 1 - i];
     }
   }
+
+  if (ofdm->noise_weight && !ofdm->pt_replay) ofdm->nv_dn += ofdm->rowsperframe;
 
   /* update mean amplitude estimate for LDPC decoder scaling */
 

@@ -1784,16 +1784,14 @@ int freedv_get_noise_weight(struct freedv *f) {
 }
 
 /* The profile of the burst in progress or just received: per carrier, the
- * mean squared pilot residual (noise plus interference, in the units of the
- * received symbols).  Writes at most max values; returns the number of
- * carriers, or 0 when the feature is off or no frame has been added yet. */
+ * larger of the mean squared pilot residual and the mean squared distance of
+ * the data symbols to their nearest constellation point (noise plus
+ * interference, in the units of the received symbols).  Returns the number
+ * of carriers written, or 0 when the feature is off, no frame has been added
+ * yet, or max is less than the number of carriers. */
 int freedv_get_noise_profile(struct freedv *f, float *per_carrier, int max) {
-  if (f == NULL || f->ofdm == NULL || !f->ofdm->noise_weight || f->ofdm->nv_n < 1)
-    return 0;
-  int nc = f->ofdm->nc;
-  for (int c = 0; c < nc && c < max; c++)
-    per_carrier[c] = f->ofdm->nv_carrier[c + 1] / f->ofdm->nv_n;
-  return nc;
+  if (f == NULL || f->ofdm == NULL || max < f->ofdm->nc) return 0;
+  return ofdm_noise_profile_get(f->ofdm, per_carrier);
 }
 
 int freedv_get_rx_decode_path(struct freedv *f) {

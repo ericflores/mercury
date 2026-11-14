@@ -229,18 +229,28 @@ struct OFDM {
   float *rx_amp_cp;
   complex float chanest_slope_cp;
 
-  /* Noise profile from the pilots (Mercury, docs/improvements/07): when
-   * noise_weight is on, every modem frame of a burst but the first adds, per
-   * carrier, the squared residual of this frame's pilot against the mean of
-   * its two neighbours in time (which cancels a slowly changing channel and
-   * leaves noise and interference), to nv_carrier[1..nc] and, summed over
-   * carriers, to nv_frame[modem frame].  nv_n counts the frames added.  The
-   * packet receiver turns the profile into per-carrier weights for one more
-   * decode attempt.  Nothing the other paths use is written from it. */
+  /* Noise profile (Mercury, docs/improvements/07), kept when noise_weight is
+   * on.  Two measurements per carrier, in the units of rx_sym squared:
+   *  - nv_carrier[1..nc]: every modem frame of a burst but the first adds the
+   *    squared residual of this frame's pilot against the mean of its two
+   *    neighbours in time, which cancels a slowly changing channel and leaves
+   *    noise and interference; nv_n counts the frames added, and nv_frame
+   *    holds the same summed over carriers, per modem frame;
+   *  - nv_data[1..nc]: every data symbol adds its squared distance to the
+   *    nearest constellation point; nv_dn counts the symbols per carrier.
+   * The pilot residual is blind to an interferer whose phase advances by a
+   * whole number of turns per modem frame (a carrier at a multiple of
+   * 1/frame period, 9.09 Hz for the 6 ms-prefix modes); the data symbols see
+   * it.  The data measurement reads low when decisions are wrong (near the
+   * cliff); the pilots do not.  ofdm_noise_profile_get() takes the larger.
+   * The packet receiver turns the profile into per-carrier weights for one
+   * more decode attempt.  Nothing the other paths use is written from it. */
   int noise_weight;
   float *nv_carrier; /* nc + 2 */
+  float *nv_data;    /* nc + 2 */
   float *nv_frame;   /* np */
   int nv_n;
+  int nv_dn;
 
   /* Window placement from the pilots' delay profile (Mercury,
    * docs/improvements/26): 0 = off.  When on, the samples shifted into rxbuf

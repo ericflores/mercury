@@ -569,8 +569,8 @@ static int decode_packet_from_syms(struct freedv *f, complex float *syms,
 static int noise_weight_scales(const struct OFDM *ofdm, float *scale) {
   int nc = ofdm->nc, flagged = 0;
   float v[nc], srt[nc];
-  if (ofdm->nv_n < NW_MIN_FRAMES) return 0;
-  for (int c = 0; c < nc; c++) v[c] = srt[c] = ofdm->nv_carrier[c + 1] / ofdm->nv_n;
+  if (ofdm->nv_n < NW_MIN_FRAMES || !ofdm_noise_profile_get(ofdm, v)) return 0;
+  for (int c = 0; c < nc; c++) srt[c] = v[c];
   for (int a = 1; a < nc; a++)
     for (int b = a; b > 0 && srt[b] < srt[b - 1]; b--) {
       float t = srt[b];

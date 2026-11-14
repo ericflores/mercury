@@ -42,6 +42,8 @@ first.
 | 25 | [30-spectrum-sharing.md](30-spectrum-sharing.md) | #30 | phase 1 receiver only; phase 2 wire change | 07, 10; capability negotiation for phase 2 | measured on the bench with the foreign signal's place known (`TRANSMIT-SIDE-RESEARCH.md` section 4): with its stretch taken out DATAC1 delivers 36 to 40 of 40 under an RTTY-like signal 20 dB over the burst, at 2.7 dB of cost to the link (1.6 dB when the transmitter leaves the hole too); the detector is not built |
 | 26 | [28-redundancy-instalments.md](28-redundancy-instalments.md) | #28 | wire change | capability negotiation, 04 (shares its stores and request), 23 (decoder stop test); 03 or 21 for the narrow rungs under their cliffs | measured at code level (`utils/ldpc_ir_sweep`, `TRANSMIT-SIDE-RESEARCH.md` section 2): the existing codes sent in parts are within 0.35 to 1.1 dB of ideal at every level; 30 % less airtime over the cliff, a smooth rate under it; nothing through the modem yet |
 | 27 | [29-channel-profile.md](29-channel-profile.md) | #29 | wire change | capability negotiation, 26 or 10 | measured on the bench (`TRANSMIT-SIDE-RESEARCH.md` section 3): DATAC1 with a 2 ms prefix, bursts 18 % shorter at the same delivery with the stock receiver up to 2 ms of delay, 0.6 dB of cost with 19 on; a long prefix does not rescue NVIS and sparser pilots are not worth it (both measured, not proposed) |
+| 28 | [32-schedule-acquisition.md](32-schedule-acquisition.md) | #32 | receiver side (modem and ARQ of one station); copies need 04 | 03, 00 | the principle measured on the deep floor's simulation (`BELOW-NOISE-RESEARCH.md` section 4.4): a search added up over 4 copies finds 40 of 40 at −24 dB where one copy is found 10 times; the OFDM rungs not measured |
+| 29 | [31-deep-floor.md](31-deep-floor.md) | #31 | new mode family, wire change | capability negotiation, 10, 04, 32 | simulated (`utils/deep_floor_sim`, `BELOW-NOISE-RESEARCH.md`): 256 tones of 128 ms, rate 1/3, 18 bit/s: −16.6 dB on CCIR Poor and NVIS, −23 dB with 8 copies; at equal rate within about 1 dB of the MFSK floor; chirps measured and rejected |
 
 Update the status column and tick the task list in the issue as work lands.
 
@@ -55,6 +57,13 @@ more compute.
 [MODEM73-NOTES.md](MODEM73-NOTES.md) goes through another open modem
 technique by technique and says which proposal each maps to; one of its
 ideas led to proposal 26.
+
+[BELOW-NOISE-RESEARCH.md](BELOW-NOISE-RESEARCH.md) is the research note
+behind proposals 31 and 32: what "below the noise" means in energy per bit,
+what kind of waveform is most unlike noise, ideas from other fields (chirps,
+radar, astronomy, GPS, hearing, deep space) each measured or rejected with
+the reason, and a deep floor simulated with the modem's codes and the
+project's channel model. Read it before proposing anything for the floor.
 
 [TRANSMIT-SIDE-RESEARCH.md](TRANSMIT-SIDE-RESEARCH.md) is the research note
 behind proposals 28 to 30: how far each rung is from the Shannon limit and

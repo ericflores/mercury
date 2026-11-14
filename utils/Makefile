@@ -189,6 +189,13 @@ mfsk_puncture_sweep: mfsk_puncture_sweep.c ../modem/mfsk/mfsk_ldpc.c ../modem/mf
 # Built on demand, like mfsk_puncture_sweep: `make -C utils ldpc_ir_sweep`.
 ldpc_ir_sweep: ldpc_ir_sweep.c ../modem/freedv/libfreedvdata.a
 	$(CC) $(CFLAGS) -O2 -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
+
+# How far below the noise can a constant-envelope, very-large-alphabet
+# waveform go on the HF channel: M-FSK against chirps (with a noncoherent
+# RAKE), the modem's LDPC codes, the project's Watterson model
+# (docs/improvements/BELOW-NOISE-RESEARCH.md).  Built on demand.
+deep_floor_sim: deep_floor_sim.c ../common/watterson.c ../common/mercury_prng.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -O2 -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
 # Broadcast a file to Mercury, or receive one, over the broadcast TCP/KISS port.
 BCAST_RQ_SRC = $(wildcard ../datalink_broadcast/raptorq/lib/*.c) \
                $(wildcard ../datalink_broadcast/raptorq/deps/obl/*.c)

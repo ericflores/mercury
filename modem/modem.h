@@ -104,6 +104,13 @@ int  modem_get_tx_delay_ms(void);
  * thread starts.  MERCURY_BLANKER=<k> overrides it. */
 void modem_set_rx_blanker(float k);
 
+/* Automatic notch for steady carriers on the captured audio, before every
+ * decoder: a line that stays on one frequency for a second is measured and
+ * removed with a 6 Hz notch, up to four at a time.  false = off (the
+ * default).  Takes effect when the receive thread starts.  MERCURY_NOTCH=1
+ * overrides it. */
+void modem_set_rx_notch(bool on);
+
 // Most recent TX burst peak amplitude in dBFS (0 dBFS = INT32 full-scale,
 // i.e. the clip ceiling).  Measured post-gain but pre-saturation, once per
 // burst, so a return value above 0 dBFS means the burst clipped by that many

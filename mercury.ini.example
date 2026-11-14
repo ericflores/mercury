@@ -207,6 +207,20 @@ rx_noise_weight = false
 ; data.  MERCURY_BLANKER=<k> overrides it.
 rx_blanker = 0
 
+; Automatic notch for steady carriers in the received audio, before every
+; decoder (issue #7): a broadcast heterodyne, a birdie, someone tuning up on
+; the frequency.  A carrier inside the passband captures the demodulator's
+; frequency tracking, and above about the signal's own level it stops
+; acquisition altogether; this finds any line that stays on one frequency for
+; a second, measures it to a fraction of a hertz and removes it with a 6 Hz
+; notch, up to four at a time, releasing each two seconds after it is gone.
+; Receiver only; for every mode, control frames and the MFSK floor included.
+; true or false (default false).  Bench-measured only
+; (docs/NOISE-WEIGHT-FINDINGS.md); not yet tried on the air.  It also removes
+; a peer's ATU tuning carrier (TUNE), which nothing decodes.  MERCURY_NOTCH=1
+; overrides it.
+rx_notch = false
+
 ; Clip the top rung (QAM16C2) on transmit (issue #2).  It is the only OFDM
 ; mode sent unclipped: its peaks are 11.6 dB over its average power, against
 ; about 7 dB for the rung below, so a transmitter set by its peaks (every SSB

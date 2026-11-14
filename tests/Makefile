@@ -349,8 +349,8 @@ test_ofdm_profile: modem/test_ofdm_profile.c $(UNITY_SRC) $(FREEDV_LIB)
 test_noise_weight: modem/test_noise_weight.c $(UNITY_SRC) $(FREEDV_LIB)
 	$(CC) $(CFLAGS) -I../modem/freedv -o $@ modem/test_noise_weight.c $(UNITY_SRC) $(FREEDV_LIB) $(LDFLAGS) -lm
 
-test_chanstats: modem/test_chanstats.c $(UNITY_SRC) $(FREEDV_LIB)
-	$(CC) $(CFLAGS) -I../modem/freedv -o $@ modem/test_chanstats.c $(UNITY_SRC) $(FREEDV_LIB) $(LDFLAGS) -lm
+test_chanstats: modem/test_chanstats.c ../modem/chan_classify.c $(UNITY_SRC) $(FREEDV_LIB)
+	$(CC) $(CFLAGS) -I../modem -I../modem/freedv -o $@ modem/test_chanstats.c ../modem/chan_classify.c $(UNITY_SRC) $(FREEDV_LIB) $(LDFLAGS) -lm
 
 test_rx_notch: modem/test_rx_notch.c ../modem/rx_notch.c $(UNITY_SRC) $(FREEDV_LIB)
 	$(CC) $(CFLAGS) -I../modem -I../modem/freedv -o $@ modem/test_rx_notch.c ../modem/rx_notch.c $(UNITY_SRC) $(FREEDV_LIB) $(LDFLAGS) -lm

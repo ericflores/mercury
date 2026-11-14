@@ -11,6 +11,7 @@
  *  - on pure noise they read no spread;
  *  - the accumulators reset at a burst's first frame and a replay leaves
  *    them alone (through the modem: tests/modem/test_noise_weight.c);
+ *  - the classification (modem/chan_classify.c) names each condition.
  *
  * Everything is seeded: the numbers are the same on every run.
  *
@@ -25,6 +26,7 @@
 #include <string.h>
 
 #include "unity.h"
+#include "chan_classify.h"
 #include "codec2_ofdm.h"
 #include "freedv_api.h"
 #include "ofdm_internal.h"
@@ -213,6 +215,55 @@ static void test_reset_and_empty(void)
     TEST_ASSERT_EQUAL_INT(0, e.ok_freq);
 }
 
+/* The classification: each rule on its own, the order, and what an
+ * unavailable field does (nothing: its rule is skipped). */
+static chan_class_in_t base(void)
+{
+    chan_class_in_t in = {.snr_db = 20.0f, .thresh_db = 3.0f, .nv_peak_db = 2.0f, .have_spread = 1,
+                          .evm_resid_db = 0.0f, .dly_ms = 0.3f, .dopp_hz = 0.3f, .cp_ms = 6.0f,
+                          .blank_frac = -1.0f, .gap_kurt = -1.0f, .gap_peaks = -1};
+    return in;
+}
+
+static void test_classify_rules(void)
+{
+    chan_class_in_t in = base();
+    TEST_ASSERT_EQUAL_INT(CHAN_CLEAN, chan_classify(&in));
+    in = base(); in.blank_frac = 0.01f;
+    TEST_ASSERT_EQUAL_INT(CHAN_IMPULSIVE, chan_classify(&in));
+    in = base(); in.gap_kurt = 9.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_IMPULSIVE, chan_classify(&in));
+    in = base(); in.gap_peaks = 1;
+    TEST_ASSERT_EQUAL_INT(CHAN_NARROWBAND, chan_classify(&in));
+    in = base(); in.nv_peak_db = 8.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_NARROWBAND, chan_classify(&in));
+    in = base(); in.evm_resid_db = 5.0f; in.dly_ms = 4.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_ISI, chan_classify(&in));
+    in = base(); in.evm_resid_db = 5.0f; in.dopp_hz = 6.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_DOPPLER, chan_classify(&in));
+    in = base(); in.evm_resid_db = 5.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_TXDIST, chan_classify(&in));
+    in = base(); in.evm_resid_db = 5.0f; in.snr_db = 8.0f; /* below 12 dB: not the transmitter */
+    TEST_ASSERT_EQUAL_INT(CHAN_CLEAN, chan_classify(&in));
+    in = base(); in.snr_db = 4.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_NOISE, chan_classify(&in));
+    /* order: impulses over a carrier over spread over noise */
+    in = base(); in.blank_frac = 0.02f; in.nv_peak_db = 9.0f; in.evm_resid_db = 6.0f; in.dly_ms = 5.0f; in.snr_db = 4.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_IMPULSIVE, chan_classify(&in));
+    in.blank_frac = -1.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_NARROWBAND, chan_classify(&in));
+    in.nv_peak_db = 1.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_ISI, chan_classify(&in));
+    in.evm_resid_db = 0.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_NOISE, chan_classify(&in));
+    /* nothing invented: no spread, no threshold */
+    in = base(); in.have_spread = 0; in.evm_resid_db = 9.0f; in.dly_ms = 5.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_CLEAN, chan_classify(&in));
+    in = base(); in.thresh_db = NAN; in.snr_db = -20.0f;
+    TEST_ASSERT_EQUAL_INT(CHAN_CLEAN, chan_classify(&in));
+    TEST_ASSERT_EQUAL_STRING("narrowband", chan_class_name(CHAN_NARROWBAND));
+}
+
 /* Through the modem, on white noise: one DATAC1 burst at one SNR3k. */
 static unsigned char g_out[2048];
 static int one_burst(struct freedv *tx, struct freedv *rx, double snr_db, struct freedv_rx_frame_stats *fs)
@@ -354,6 +405,7 @@ int main(void)
     RUN_TEST(test_doppler_estimate);
     RUN_TEST(test_delay_estimate);
     RUN_TEST(test_noise_only);
+    RUN_TEST(test_classify_rules);
     RUN_TEST(test_awgn_evm);
     RUN_TEST(test_off_is_zero);
     RUN_TEST(test_decode_unchanged);

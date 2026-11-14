@@ -2055,6 +2055,134 @@ int ofdm_noise_profile_get(const struct OFDM *ofdm, float *v) {
   return ofdm->nc;
 }
 
+/* ---------------------------------------------------------------------------
+ * Doppler and delay spread from the pilot rows
+ * (docs/improvements/10-channel-telemetry.md).  The channel seen by one
+ * carrier is h(t, f).  Two correlations of the pilots, each pooled over the
+ * burst, say how fast it changes in time and across frequency:
+ *
+ *  - Time.  For a Gaussian Doppler spectrum with spread 2*sigma the
+ *    correlation of two rows T apart is rho(T) = exp(-2 pi^2 sigma^2 T^2), so
+ *    rho(2T) = rho(T)^4.  The lag-1 and lag-2 sums are both free of noise
+ *    bias (the noise of one row is independent of the next), and their ratio
+ *    is rho^3 whatever the signal power: rho = (|t2| / |t1|)^(1/3).  That
+ *    ratio is lost in the noise once rho(2T) is below the sums' own noise
+ *    (a Doppler spread over about 4 Hz with the 0.11 s row spacing); there
+ *    |t1| over the pilot power is used instead, which noise biases towards a
+ *    faster channel, and the spread saturates at DOPP_MAX_HZ.  The rows are
+ *    0.11 s apart, so a spread over 4.5 Hz aliases; "fast" is all this can say.
+ *  - Frequency.  For two equal paths tau apart the correlation of adjacent
+ *    carriers is cos(pi df tau) and of carriers two apart cos(2 pi df tau),
+ *    times the same phase factor to the power of the lag.  The phase factor
+ *    (the slope the FFT window's place in the prefix adds) is taken from the
+ *    burst's own lag-1 sum.  With s the signal power, r1 = s cos x and
+ *    r2 = s cos 2x, so s solves s^2 + r2 s - 2 r1^2 = 0 and no noise
+ *    estimate is needed: x = acos(r1 / s), tau = x / (pi df).  A channel of
+ *    other shape reads as the two equal paths with the same decorrelation.
+ *
+ * Noise.  The squared second difference across carriers, after the row's own
+ * slope is removed, is 1.5 v for noise of variance v on a smooth channel; with
+ * the one across time that the noise profile already holds, the smaller of the
+ * two is a noise estimate that is not inflated by whichever selectivity the
+ * channel has, if it lacks the other. */
+#define OFDM_DOPP_MAX_HZ 8.8f /* rho = 0.01 at T = 0.11 s */
+
+void ofdm_chan_acc_reset(struct ofdm_chan_acc *a) {
+  memset(a, 0, sizeof(*a));
+}
+
+void ofdm_chan_acc_add_frame(struct ofdm_chan_acc *a, int nc,
+                             const complex float *h0, const complex float *h1,
+                             const complex float *h2) {
+  complex float c1 = 0.0f, c2 = 0.0f;
+  float p = 0.0f;
+  for (int i = 1; i <= nc; i++) {
+    p += cnormf(h0[i]);
+    if (i < nc) c1 += h0[i] * conjf(h0[i + 1]);
+    if (i < nc - 1) c2 += h0[i] * conjf(h0[i + 2]);
+  }
+  a->f1 += c1;
+  a->f2 += c2;
+  a->pf += p;
+  a->nf++;
+  if (nc >= 4 && cabsf(c1) > 0.0f) {
+    complex float rot = conjf(c1) / cabsf(c1); /* e^{-j phi} */
+    float e = 0.0f;
+    for (int i = 2; i < nc; i++) {
+      complex float d = h0[i] - 0.5f * (h0[i - 1] * rot + h0[i + 1] * conjf(rot));
+      e += cnormf(d);
+    }
+    a->vf += e / 1.5f;
+    a->nvf += nc - 2;
+  }
+  if (h2 != NULL) {
+    complex float s1 = 0.0f, s2 = 0.0f;
+    for (int i = 1; i <= nc; i++) {
+      s1 += h0[i] * conjf(h1[i]);
+      s2 += h0[i] * conjf(h2[i]);
+    }
+    a->t1 += s1;
+    a->t2 += s2;
+    a->pt += p;
+    a->nt++;
+  }
+}
+
+int ofdm_chan_acc_result(const struct ofdm_chan_acc *a, int nc, float row_dt,
+                         float df, struct ofdm_chan_est *out) {
+  memset(out, 0, sizeof(*out));
+  if (a->nf >= 1) out->pilot_pwr = a->pf / ((float)a->nf * (float)nc);
+  if (a->nt >= 3) {
+    float n = (float)a->nt * (float)nc;
+    float p = a->pt / n, r1 = cabsf(a->t1) / n, r2 = cabsf(a->t2) / n;
+    /* The sums' own spread.  The carriers of a two-path channel are not
+     * independent draws (a handful of fades make the whole row), so the
+     * number of frames, not of terms, sets it. */
+    float noise = p / sqrtf((float)a->nt);
+    float rho;
+    if (r2 > 1.5f * noise && r1 > r2)
+      rho = cbrtf(r2 / r1);
+    else
+      rho = (r1 - 0.6f * noise) / (p > 0.0f ? p : 1.0f);
+    if (rho > 1.0f) rho = 1.0f;
+    if (rho < 0.01f) rho = 0.01f;
+    out->dopp_hz = 2.0f * sqrtf(-logf(rho) / 2.0f) / ((float)M_PI * row_dt);
+    out->ok_time = 1;
+  }
+  if (a->nf >= 2 && nc >= 4) {
+    float n1 = (float)a->nf * (float)(nc - 1), n2 = (float)a->nf * (float)(nc - 2);
+    float m1 = cabsf(a->f1);
+    if (m1 > 0.0f) {
+      float r1 = m1 / n1;
+      float r2 = crealf(a->f2 * conjf(a->f1) * conjf(a->f1)) / (m1 * m1) / n2;
+      float s = 0.5f * (-r2 + sqrtf(r2 * r2 + 8.0f * r1 * r1));
+      if (s > 0.0f) {
+        float c = r1 / s;
+        if (c > 1.0f) c = 1.0f;
+        out->dly_ms = 1000.0f * acosf(c) / ((float)M_PI * df);
+        out->ok_freq = 1;
+      }
+    }
+    if (a->nvf > 0) out->noise_f = a->vf / (float)a->nvf;
+  }
+  return out->ok_time || out->ok_freq;
+}
+
+/* One modem frame's rows into the accumulators, beside the noise profile. */
+static void ofdm_chan_profile(struct OFDM *ofdm) {
+  int nc = ofdm->nc;
+  complex float h0[nc + 2], h1[nc + 2], h2[nc + 2];
+  if (ofdm_frame_is_first(ofdm)) ofdm_chan_acc_reset(&ofdm->chan_acc);
+  for (int i = 1; i <= nc; i++) {
+    complex float pc = conjf(ofdm->pilots[i]);
+    h0[i] = ofdm->rx_sym[1][i] * pc;
+    h1[i] = ofdm->rx_sym[ofdm->ns + 1][i] * pc;
+    h2[i] = ofdm->rx_sym[ofdm->ns + 2][i] * pc;
+  }
+  ofdm_chan_acc_add_frame(&ofdm->chan_acc, nc, h0, h1,
+                          ofdm_frame_is_last(ofdm) ? NULL : h2);
+}
+
 static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
   int prev_timing_est = ofdm->timing_est;
   int i, j, k, rr, st, en;
@@ -2469,8 +2597,10 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
 
   /* Not in a replay: it runs on a copy of this struct, which shares the
    * accumulators, and the profile is of the live pass. */
-  if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay)
+  if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay) {
     ofdm_noise_profile(ofdm);
+    ofdm_chan_profile(ofdm);
+  }
 
   float aphase_alt[ofdm->nc + 2];
   float aamp_alt[ofdm->nc + 2];
@@ -2528,8 +2658,11 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
        */
       ofdm->rx_amp[(rr * ofdm->nc) + (i - 1)] = aamp_est_pilot[i];
       sum_amp += aamp_est_pilot[i];
-      if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay)
+      if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay) {
         ofdm->nv_data[i] += ofdm_noise_data_err(ofdm, rx_corr, aamp_est_pilot[i]);
+        ofdm->chan_acc.ev += cnormf(rx_corr);
+        ofdm->chan_acc.nev++;
+      }
 
       if (ofdm->chanest_alt) {
         ofdm->rx_np_alt[(rr * ofdm->nc) + (i - 1)] =

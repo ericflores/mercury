@@ -318,6 +318,21 @@ struct freedv_rx_frame_stats {
   int noise_flagged;   /* carriers the noise weights singled out (0 if off) */
   float noise_peak_db; /* noisiest carrier over the median carrier, dB */
   float noise_peak_hz; /* that carrier's audio frequency */
+  /* From the pilot rows and the data symbols of the burst so far; coarse
+   * (docs/CHANSTATS-FINDINGS.md).  chan_valid: 1 = dopp_hz, 2 = dly_ms,
+   * 4 = evm_db, evm_excess_db, evm_resid_db could be formed; a field not valid
+   * is 0.  evm_floor_db is the EVM the mode's stock transmitter leaves on a
+   * perfect channel (its Hilbert clipper), measured on AWGN at 40 dB
+   * (docs/CHANSTATS-FINDINGS.md); -100 where none was measured or none is
+   * there. */
+  float dopp_hz;       /* Doppler spread (2 sigma); saturates near 9 Hz */
+  float dly_ms;        /* delay spread, as the separation of two equal paths */
+  float evm_db;        /* error of the equalised data symbols, dB under power */
+  float evm_excess_db; /* evm_db over what the pilot noise alone predicts */
+  float evm_floor_db;  /* the mode's own transmitter floor (stock clipper) */
+  float evm_resid_db;  /* evm_db over the noise and that floor together */
+  float cp_ms;         /* the mode's cyclic prefix */
+  int chan_valid;
 };
 int freedv_get_rx_frame_stats(struct freedv *freedv,
                               struct freedv_rx_frame_stats *st);

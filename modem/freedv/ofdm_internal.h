@@ -116,6 +116,26 @@ struct OFDM_CONFIG {
 /* Profile tracking (Mercury, docs/improvements/26): the heap state lives in
  * ofdm.c, allocated when the feature is switched on. */
 struct OFDM_PT;
+
+/* Pilot-row correlations of one burst (Mercury, docs/improvements/10), kept
+ * when noise_weight or nv_stats is on and never in a profile replay.  The
+ * pilots are h = rx_sym * conj(pilot), one value per carrier:
+ *  - t1, t2: sums over carriers and frames of h_k * conj(h_{k+1}) and
+ *    h_k * conj(h_{k+2}), the same carrier one and two modem frames apart
+ *    (nt = frames summed, pt = the power of the h_k summed).  Noise is
+ *    independent from row to row, so it does not bias either sum;
+ *  - f1, f2: sums of h_i * conj(h_{i+1}) and h_i * conj(h_{i+2}) across
+ *    adjacent carriers of a pilot row (nf = rows, pf = their power, vf = the
+ *    squared second difference across carriers after removing the row's own
+ *    phase slope, which the FFT window's place in the prefix puts there);
+ *  - ev = the power of the equalised data symbols, summed.
+ * ofdm_chan_acc_result() turns them into a Doppler spread, a delay spread
+ * and a noise estimate. */
+struct ofdm_chan_acc {
+  complex float t1, t2, f1, f2;
+  float pt, pf, vf, ev;
+  int nt, nf, nvf, nev;
+};
 #define OFDM_PT_MAXTRK 8   /* tracked paths */
 #define OFDM_PT_MAXPATHS 3 /* paths one frame's matching pursuit can report */
 
@@ -252,6 +272,7 @@ struct OFDM {
   float *nv_frame;   /* np */
   int nv_n;
   int nv_dn;
+  struct ofdm_chan_acc chan_acc;
 
   /* Window placement from the pilots' delay profile (Mercury,
    * docs/improvements/26): 0 = off.  When on, the samples shifted into rxbuf
@@ -418,6 +439,30 @@ int ofdm_profile_replay(struct OFDM *ofdm, complex float *syms, float *amps,
 void ofdm_profile_test_stock_timing(struct OFDM *ofdm, int on);
 /* Frames the last replay erased because their rows were past the buffer. */
 int ofdm_profile_nerased(struct OFDM *ofdm);
+
+/* The estimators behind dopp, dly, evm and evm_excess
+ * (docs/improvements/10-channel-telemetry.md).  Pure functions of the
+ * accumulators, so a test can feed them synthetic pilots.  `h0` is the pilot
+ * row of the frame, `h1` the next frame's and `h2` the one after it or NULL
+ * where there is none (the burst's last frame: its row still counts across
+ * carriers, but not in the time sums); all indexed 1..nc and already times
+ * the conjugate of the transmitted pilot. */
+void ofdm_chan_acc_reset(struct ofdm_chan_acc *a);
+void ofdm_chan_acc_add_frame(struct ofdm_chan_acc *a, int nc,
+                             const complex float *h0, const complex float *h1,
+                             const complex float *h2);
+struct ofdm_chan_est {
+  float dopp_hz;   /* Doppler spread (2 sigma of a Gaussian spectrum) */
+  float dly_ms;    /* separation of two equal paths with this decorrelation */
+  float noise_f;   /* per-pilot noise variance from second differences
+                      across carriers, after removing each row's phase slope */
+  float pilot_pwr; /* mean power of a pilot, noise included */
+  int ok_time, ok_freq;
+};
+/* T = spacing of pilot rows in s, df = carrier spacing in Hz.  Fills what the
+ * sums allow (ok_time, ok_freq say which); returns 0 when neither. */
+int ofdm_chan_acc_result(const struct ofdm_chan_acc *a, int nc, float row_dt,
+                         float df, struct ofdm_chan_est *out);
 
 #ifdef __cplusplus
 }

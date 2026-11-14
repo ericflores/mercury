@@ -1779,6 +1779,23 @@ void freedv_set_noise_stats(struct freedv *f, int on) {
   if (f != NULL && f->ofdm != NULL) ofdm_set_noise_stats(f->ofdm, on);
 }
 
+/* The error vector magnitude a mode's stock transmitter leaves on a perfect
+ * channel, dB under the symbol power: its Hilbert clipper.  Measured with
+ * utils/chanstats_bench on AWGN at 40 dB SNR3k, 6 bursts (clipper off: the
+ * floor goes away and evm_excess reads 0 to 0.4 dB from 10 to 30 dB).  A
+ * receiver that does not know it reads every clean DATAC1 frame above 12 dB
+ * as "distorted at the transmitter". */
+static float freedv_evm_floor_db(int mode) {
+  switch (mode) {
+    case FREEDV_MODE_DATAC1: return -12.9f;
+    case FREEDV_MODE_DATAC3: return -14.0f;
+    case FREEDV_MODE_DATAC4: return -22.5f;
+    case FREEDV_MODE_DATAC17: return -10.0f;
+    case FREEDV_MODE_QAM16C2: return -35.0f; /* no clipper: the bench's own floor */
+    default: return -100.0f;
+  }
+}
+
 /* Telemetry for the packet just finished
  * (docs/improvements/10-channel-telemetry.md).  Returns 0 for a mode that is
  * not an OFDM data mode. */
@@ -1787,6 +1804,7 @@ int freedv_get_rx_frame_stats(struct freedv *f,
   if (f == NULL || f->ofdm == NULL || f->ldpc == NULL || st == NULL) return 0;
   struct OFDM *ofdm = f->ofdm;
   memset(st, 0, sizeof(*st));
+  st->evm_floor_db = -100.0f;
   st->ok = f->rx_last_ok;
   st->path = f->rx_decode_path;
   st->pcc = f->rx_last_pcc;
@@ -1795,6 +1813,7 @@ int freedv_get_rx_frame_stats(struct freedv *f,
   st->snr_db = f->snr_est;
   st->foff_hz = ofdm->foff_est_hz;
   st->noise_flagged = f->rx_noise_flagged;
+  st->cp_ms = 1000.0f * ofdm->tcp;
   float v[ofdm->nc];
   if (ofdm_noise_profile_get(ofdm, v)) {
     float srt[ofdm->nc];
@@ -1813,6 +1832,49 @@ int freedv_get_rx_frame_stats(struct freedv *f,
     if (med > 0.0f) st->noise_peak_db = 10.0f * log10f(v[arg] / med);
     /* carriers are one symbol rate apart, centred on rx_centre */
     st->noise_peak_hz = ofdm->rx_centre + ((float)arg - 0.5f * (float)(nc - 1)) * ofdm->rs;
+  }
+  /* Spreads and EVM (same switch as the profile). */
+  if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay) {
+    const struct ofdm_chan_acc *a = &ofdm->chan_acc;
+    struct ofdm_chan_est ce;
+    float row_dt = (float)ofdm->ns * (ofdm->ts + ofdm->tcp);
+    if (ofdm_chan_acc_result(a, ofdm->nc, row_dt, ofdm->rs, &ce)) {
+      if (ce.ok_time) {
+        st->dopp_hz = ce.dopp_hz;
+        st->chan_valid |= 1;
+      }
+      if (ce.ok_freq) {
+        st->dly_ms = ce.dly_ms;
+        st->chan_valid |= 2;
+      }
+    }
+    if (a->nev > 0 && ofdm->nv_dn > 0 && ofdm->nv_n > 0 && ce.pilot_pwr > 0.0f) {
+      float err = 0.0f, vt = 0.0f;
+      for (int c = 1; c <= ofdm->nc; c++) {
+        err += ofdm->nv_data[c];
+        vt += ofdm->nv_carrier[c];
+      }
+      err /= (float)ofdm->nv_dn * (float)ofdm->nc;
+      vt /= (float)ofdm->nv_n * (float)ofdm->nc;
+      float pd = a->ev / (float)a->nev;
+      /* Noise: the smaller of the two second-difference estimates, each
+       * inflated by the selectivity of its own axis. */
+      float v = vt;
+      if (ce.ok_freq && ce.noise_f > 0.0f && ce.noise_f < v) v = ce.noise_f;
+      /* What the noise alone does to a decided symbol: its own variance, and
+       * the error of the two-pilot reference it is judged against (the
+       * average of two pilots has variance v/2: v/4 on the phase, scaled
+       * to the symbol, and v/4 on the amplitude it is decided at). */
+      float pred = v * (1.0f + 0.5f * pd / ce.pilot_pwr);
+      if (err > 0.0f && pd > 0.0f && pred > 0.0f) {
+        st->evm_db = 10.0f * log10f(err / pd);
+        st->evm_excess_db = 10.0f * log10f(err / pred);
+        st->evm_floor_db = freedv_evm_floor_db(f->mode);
+        st->evm_resid_db =
+            10.0f * log10f(err / (pred + powf(10.0f, 0.1f * st->evm_floor_db) * pd));
+        st->chan_valid |= 4;
+      }
+    }
   }
   return 1;
 }

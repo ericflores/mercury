@@ -163,7 +163,7 @@ is in `[audio]`. "Token" is the name in `utils/rx_bench` and
 | 07 | `MERCURY_NOISE_WEIGHT=1` | `rx_noise_weight = true` | attempt with interfered carriers' soft bits scaled down (path 5) | `nw` |
 | 20 | `MERCURY_DD=1` | `rx_decision_directed = true` | attempt from a channel estimate that also uses the decoder's belief about the data (path 6) | `dd` |
 | 07 | `MERCURY_NOTCH=1` | `rx_notch = true` | automatic notch for steady carriers on the captured audio, every decoder | `nt` |
-| 08 | `MERCURY_BLANKER=6` | `rx_blanker = 6` | impulse blanker on the captured audio, every decoder | `bK` |
+| 08 | `MERCURY_BLANKER=8` | `rx_blanker = 8` | impulse blanker on the captured audio, every decoder | `bK` |
 | 23 | `MERCURY_RX_EARLY_STOP=1` | `rx_early_stop = true` | abandon LDPC decodes that are going nowhere (cheaper, not better) | `es` |
 | 02 | `MERCURY_QAM16C2_CLIP=1` | `qam16c2_tx_clip = true` | clip QAM16C2 on transmit: same peak, 4.9 dB more average power | (see `utils/qam16_papr_sweep`) |
 

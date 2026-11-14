@@ -154,5 +154,7 @@ Findings: `docs/BLANKER-FINDINGS.md`.
 - So a clean burst loses nothing at its start (the design accepted 2 ms),
   and the price is 8 ms of latency when the blanker is on.
 - The 5 % per-second cap is as designed.
+- Recommended threshold 8, not the 6 of the design: 6 costs the unclipped
+  QAM16C2 a few frames under fading.
 - Not built: the blanked-sample map for the decoder (phase 2), the periodic
   mode (phase 3), the modem73 soft variant, the MFSK bench.

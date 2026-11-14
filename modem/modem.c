@@ -230,7 +230,7 @@ static float rx_blanker_setting(void)
     }
     int k100 = atomic_load(&g_rx_blanker_k100);
     if (!k100 && modem_freedv_rx_all())
-        k100 = 600; /* the recommended threshold */
+        k100 = 800; /* the recommended threshold (docs/BLANKER-FINDINGS.md) */
     return (float)k100 / 100.0f;
 }
 

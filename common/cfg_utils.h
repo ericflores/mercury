@@ -165,7 +165,7 @@ typedef struct {
                                     * false (default) off. */
     float    rx_blanker;            /* Impulse blanker threshold on the captured
                                     * audio (issue #8): 0 off (default), else
-                                    * 1..100; 6 is the recommended value. */
+                                    * 1..100; 8 is the recommended value. */
     bool     rx_notch;              /* Automatic notch for steady carriers on
                                     * the captured audio (issue #7).  false
                                     * (default) off. */

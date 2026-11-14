@@ -209,8 +209,8 @@ rx_noise_weight = false
 ; static clicks), which spread over every carrier of the symbols they land in.
 ; A sample more than this many times the tracked level of the audio is zeroed,
 ; with what follows it, unless the rise lasts (a burst arriving, a long
-; crash).  0 = off (default); 6 is the recommended value; lower values start
-; to cut the signal's own peaks.  Receiver only.  The audio reaches the
+; crash).  0 = off (default); 8 is the recommended value; 6 costs the top
+; rung a few frames under fading and 4 cuts every mode's own peaks.  Receiver only.  The audio reaches the
 ; decoders 8 ms later when it is on.  Bench-measured only
 ; (docs/BLANKER-FINDINGS.md); not yet tried on the air: real static arrives
 ; shaped by the radio's filter and AGC.  Use fast or no AGC on the radio for
@@ -256,7 +256,7 @@ rx_decision_directed = false
 
 ; For a trial: every receiver-only improvement above on at once, at its
 ; recommended setting (rx_chanest auto, rx_cp_recycle 4, rx_profile_track,
-; rx_noise_weight, rx_decision_directed, rx_notch, rx_blanker 6,
+; rx_noise_weight, rx_decision_directed, rx_notch, rx_blanker 8,
 ; rx_early_stop).  All of them are receiver-side: the station works with any
 ; peer, and nothing it transmits changes.  Each key above can still switch
 ; its feature on without this one, and a feature's environment variable set

@@ -49,7 +49,9 @@ typedef struct {
 } rx_blanker_t;
 
 /* k = 0 switches it off: rx_blanker_process() then leaves the buffer alone
- * (no delay either).  The recommended value when on is 6. */
+ * (no delay either).  The recommended value when on is 8
+ * (docs/BLANKER-FINDINGS.md: 6 costs the unclipped QAM16C2 a few frames under
+ * fading, 4 cuts every mode's own peaks). */
 void rx_blanker_init(rx_blanker_t *b, float k, int fs);
 
 /* In place.  Returns the number of samples zeroed in this call.  When on, the

@@ -21,6 +21,10 @@
  *               pt           the profile-tracker replay (proposal 26); modes
  *                            of fewer than 9 carriers ignore it, as in mercury
  *               nw           noise-aware soft bits (proposal 07)
+ *               bK           the impulse blanker at threshold K over the
+ *                            audio before the decoder (proposal 08); the
+ *                            recording is raw, as MERCURY_RX_DUMP writes it
+ *                            before the blanker
  *             The first variant is the reference the others are compared to.
  *   modes     comma list of mode names, or "arq" (default): DATAC16, DATAC15,
  *             DATAC4, DATAC3, DATAC1, DATAC17, QAM16C2, the control mode and
@@ -57,6 +61,7 @@
 #include "bench_common.h"
 #include "freedv_api.h"
 #include "codec2_ofdm.h"
+#include "rx_blanker.h"
 
 #define FS 8000
 #define MAX_VARIANTS 8
@@ -70,6 +75,7 @@ typedef struct {
   int cp;
   int pt;
   int nw;
+  float blank;
   char name[64];
 } variant_t;
 
@@ -96,12 +102,20 @@ static int parse_variant(const char *s, variant_t *v) {
   v->cp = 0;
   v->pt = 0;
   v->nw = 0;
+  v->blank = 0.0f;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -2;
     if (!strcmp(t, "stock")) continue;
     if (!strcmp(t, "pt")) { v->pt = 1; continue; }
     if (!strcmp(t, "nw")) { v->nw = 1; continue; }
+    if (t[0] == 'b' && t[1] >= '0' && t[1] <= '9') {
+      char *end;
+      double kb = strtod(t + 1, &end);
+      if (*end || kb < 1.0 || kb > 100.0) { fprintf(stderr, "variant '%s': bad threshold in '%s'\n", s, t); return -1; }
+      v->blank = (float)kb;
+      continue;
+    }
     if (!strcmp(t, "auto")) est = EST_AUTO;
     else if (!strcmp(t, "t4")) est = OFDM_CHANEST_T4;
     else if (!strcmp(t, "t4f3")) est = OFDM_CHANEST_T4F3;
@@ -119,7 +133,7 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, auto, t4, t4f3, t4f5, cpN, pt, nw\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, auto, t4, t4f3, t4f5, cpN, pt, nw, bK\n", t, s);
     return -1;
   }
   return 0;
@@ -254,13 +268,29 @@ int main(int argc, char **argv) {
 
   printf("%s: %ld samples, %.1f s; seed 0x%04x; reference variant: %s\n", argv[1], n, (double)n / FS, seed,
          v[0].name);
+  /* the audio each variant decodes: the recording, or a blanked copy of it */
+  short *sv[MAX_VARIANTS];
+  for (int k = 0; k < nv; k++) {
+    sv[k] = s;
+    if (v[k].blank > 0.0f) {
+      rx_blanker_t bl;
+      sv[k] = malloc(sizeof(short) * (size_t)(n > 0 ? n : 1));
+      if (!sv[k]) { fprintf(stderr, "out of memory\n"); return 1; }
+      memcpy(sv[k], s, sizeof(short) * (size_t)n);
+      rx_blanker_init(&bl, v[k].blank, FS);
+      rx_blanker_process(&bl, sv[k], (int)n);
+      printf("variant %s: %.4f %% of the samples blanked, %llu impulses\n", v[k].name,
+             100.0 * rx_blanker_fraction(&bl), (unsigned long long)bl.impulses);
+    }
+  }
+
   printf("%-8s %-18s %6s %7s  %5s %5s %5s %5s %5s  %6s %5s  %6s\n", "mode", "variant", "frames", "seeded", "p0",
          "p2", "p3", "p4", "p5", "gained", "lost", "syncs");
 
   int tot[MAX_VARIANTS] = {0}, totg[MAX_VARIANTS] = {0}, totl[MAX_VARIANTS] = {0};
   for (int m = 0; m < nm; m++) {
     result_t r[MAX_VARIANTS];
-    for (int k = 0; k < nv; k++) decode_file(modes[m], &v[k], seed, s, n, &r[k]);
+    for (int k = 0; k < nv; k++) decode_file(modes[m], &v[k], seed, sv[k], n, &r[k]);
     for (int k = 0; k < nv; k++) {
       int p[6] = {0}, seeded = 0;
       for (int i = 0; i < r[k].n; i++) {
@@ -282,6 +312,8 @@ int main(int argc, char **argv) {
   for (int k = 0; k < nv; k++)
     printf("%-8s %-18s %6d %7s  %5s %5s %5s %5s %5s  %6d %5d\n", "all", v[k].name, tot[k], "", "", "", "", "", "",
            totg[k], totl[k]);
+  for (int k = 0; k < nv; k++)
+    if (sv[k] != s) free(sv[k]);
   free(s);
   return 0;
 }

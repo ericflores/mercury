@@ -31,6 +31,10 @@
  *                      those carriers scaled down, from the best rows the
  *                      other tokens give (recycled, else alternative
  *                      estimate, else stock)
+ *               bK     the impulse blanker at threshold K (proposal 08,
+ *                      modem/rx_blanker.c) run over the audio before the
+ *                      decoder, as mercury's receive thread does; b6 is the
+ *                      recommended setting
  *             e.g. stock,t4f5,t4f5+cp4,t4f5+cp20,pt,t4f3+cp4+pt
  *   tone      an unmodulated carrier at tone_hz, tone_db relative to the
  *             burst's total power
@@ -53,6 +57,7 @@
 #include "chanutil.h"
 #include "freedv_api.h"
 #include "codec2_ofdm.h"
+#include "rx_blanker.h"
 
 #define FS 8000.0
 #define HEADROOM_PEAK 4000.0
@@ -62,7 +67,7 @@ static bench_rng rng = {1357911131517ULL};
 static double gauss(void) { return bench_rng_gauss(&rng); }
 static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
 
-typedef struct { int chanest; int cp; int pt; int nw; char name[64]; } variant_t;
+typedef struct { int chanest; int cp; int pt; int nw; float blank; char name[64]; } variant_t;
 
 /* Parse one variant: '+'-joined exact tokens.  0 on success. */
 static int parse_variant(const char *s, variant_t *v) {
@@ -75,6 +80,7 @@ static int parse_variant(const char *s, variant_t *v) {
   v->cp = 0;
   v->pt = 0;
   v->nw = 0;
+  v->blank = 0.0f;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -1;
@@ -95,6 +101,13 @@ static int parse_variant(const char *s, variant_t *v) {
       v->chanest = est;
       continue;
     }
+    if (t[0] == 'b' && t[1] >= '0' && t[1] <= '9') {
+      char *end;
+      double kb = strtod(t + 1, &end);
+      if (*end || kb < 1.0 || kb > 100.0) { fprintf(stderr, "variant '%s': bad threshold in '%s'\n", s, t); return -1; }
+      v->blank = (float)kb;
+      continue;
+    }
     if (t[0] == 'c' && t[1] == 'p' && t[2] >= '0' && t[2] <= '9') {
       char *end;
       long n = strtol(t + 2, &end, 10);
@@ -104,10 +117,10 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw, bK\n", t, s);
     return -1;
   }
-  if (have_stock && (have_est || have_cp || have_pt || v->nw)) {
+  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f)) {
     fprintf(stderr, "variant '%s': 'stock' cannot be combined\n", s);
     return -1;
   }
@@ -167,6 +180,7 @@ int main(int argc, char **argv) {
 
   short *burst = malloc(sizeof(short) * (size_t)(nburst + 4));
   short *buf = malloc(sizeof(short) * (size_t)ntot);
+  short *wbuf = malloc(sizeof(short) * (size_t)ntot);
   unsigned char *payload = malloc((size_t)nbytes), *out = malloc((size_t)nbytes + 8);
 
   printf("%s %d B, burst %.2f s, chan %s, tone %.0f Hz %+.0f dB, impulses %.1f/s %+.0f dB\n", argv[1], nbytes,
@@ -223,7 +237,17 @@ int main(int argc, char **argv) {
       int any = 0;
       for (int k = 0; k < nv; k++) {
         int ss = 0, got = 0;
-        bench_run_burst(rx[k], buf, ntot, 0, 0.0, out, zero_noise, NULL, &ss, &got, NULL, NULL);
+        const short *src = buf;
+        if (v[k].blank > 0.0f) {
+          /* a fresh blanker per trial: the lead of noise before the burst
+           * sets its level, as the noise before a burst does on the air */
+          rx_blanker_t bl;
+          rx_blanker_init(&bl, v[k].blank, (int)FS);
+          memcpy(wbuf, buf, sizeof(short) * (size_t)ntot);
+          rx_blanker_process(&bl, wbuf, ntot);
+          src = wbuf;
+        }
+        bench_run_burst(rx[k], src, ntot, 0, 0.0, out, zero_noise, NULL, &ss, &got, NULL, NULL);
         if (got && memcmp(out, payload, (size_t)nbytes - 2)) got = 0;
         acq[k] += ss; del[k] += got; any |= got;
       }
@@ -237,6 +261,6 @@ int main(int argc, char **argv) {
   }
   for (int k = 0; k < nv; k++) freedv_close(rx[k]);
   freedv_close(tx);
-  free(burst); free(buf); free(payload); free(out);
+  free(burst); free(buf); free(wbuf); free(payload); free(out);
   return 0;
 }

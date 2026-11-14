@@ -78,12 +78,12 @@ acquire_vs_decode: acquire_vs_decode.c bench_common.c chanutil.c ../common/watte
 	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
 
 # Several receiver variants on the same samples (docs/improvements/00-bench.md).
-rx_bench: rx_bench.c bench_common.c chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/freedv/libfreedvdata.a
+rx_bench: rx_bench.c bench_common.c chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/rx_blanker.c ../modem/freedv/libfreedvdata.a
 	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
 
 # The same comparison on a recording of what a station received
 # (MERCURY_RX_DUMP): every variant decodes the same samples.
-rx_replay: rx_replay.c bench_common.c ../modem/freedv/libfreedvdata.a
+rx_replay: rx_replay.c bench_common.c ../modem/rx_blanker.c ../modem/freedv/libfreedvdata.a
 	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
 
 # Sweeps the acquisition knobs (timing_mx_thresh, bad_uw_errors) around the

@@ -139,3 +139,34 @@ is measured; it is the one known route to the rest of the NVIS loss.
 - CCIR Poor and NVIS: report the fraction of the genie's extra frames
   recovered; keep the feature if it is above a third on either.
 - False accepts: zero in 1000 noise-only windows per mode.
+
+## As built (2026-11-14)
+
+Findings: `docs/DECISION-DIRECTED-FINDINGS.md`.
+
+- It works on the packet's **already corrected** symbols, not on a stored
+  grid of raw rows. For a carrier in a modem frame, with `y` the corrected
+  data symbols, `a` the base estimate's amplitude and `s` the soft symbols:
+
+  ```
+  h = (W·a + Σ y·conj(s)) / (W + Σ |s|²)
+  ```
+
+  `W` is the number of pilots the base estimate is worth (2 for the stock
+  estimate, 3.2 for the alternative estimate's 1,3,3,1 weights). In the
+  corrected domain the pilots' products are `W·a`, real and positive. This
+  is the genie's formula (`num / den` above) without keeping `rx_grid`, and
+  each frame stays referred to its own pilots, which the genie runs asked
+  for. Then 1-2-1 across carriers where there are at least 9: in this domain
+  each carrier's phase is already referred to its own estimate, so there is
+  no slope to remove (`dd_refine()`, `freedv_700.c`).
+- The base is the failed attempt that satisfied most parity checks (stock,
+  09, 19 or 26); its posterior soft bits come from the decoder
+  (`run_ldpc_decoder_post`, `ldpc_decode_frame_post`), and
+  `llrs_to_soft_symbols()` (`mpdecode_core.c`) is the inverse of the
+  demapper.
+- Two rounds at most, while the parity count rises; each decode starts from
+  fresh channel soft bits. Decode path 6. `MERCURY_DD=1` /
+  `[audio] rx_decision_directed`.
+- Not built: the genie as a permanent bench variant (step 1), the per-frame
+  common-phase measurement (step 2), the second phase for NVIS.

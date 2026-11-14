@@ -115,3 +115,17 @@ contradicting SNR should cap the ladder"). Judge it on the NVIS sim channels
   0.1-1 Hz from 10 Hz presets.
 - Synthetic confusion matrix: each of the six conditions classified
   correctly in at least 80 % of frames at SNR 10 dB above the rung threshold.
+
+## As built, first part (2026-11-14)
+
+- `freedv_get_rx_frame_stats()` and a `chanstats:` line in the timing log
+  per OFDM packet finished (`modem/modem_freedv.c`, `fdv_rawdata_rx`), with
+  `MERCURY_CHANSTATS=1` / `[main] chanstats = true`: `mode ok path snr foff
+  pcc it nvpk nvhz nvflag`. The line is at TIMING level, not DEBUG, because
+  the log file (`-L`) is where a session's record is kept.
+- `nvpk` / `nvhz` come from proposal 07's noise profile (noisiest carrier
+  over the median, and its audio frequency); `freedv_set_noise_stats()`
+  keeps the profile without the weighted attempt.
+- Not built: `dopp`, `dly`, `evm`, `evm_excess`, the gap statistics, the
+  per-round line, the status snapshot, the classification, the
+  `onair_logs.py` summary.

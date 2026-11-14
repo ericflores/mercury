@@ -165,3 +165,22 @@ AWGN points with the stock variant and checks the counts against
 - Keep `HEADROOM_PEAK` at 4000 as the other tools do.
 - The tone level convention in the prototype was "dB relative to total signal
   power"; keep it and state it in every table.
+
+## As built so far (2026-11-14)
+
+- `utils/rx_bench`: variants are `+`-joined tokens `stock t4 t4f3 t4f5 cpN pt
+  nw bK nt es dd`; a tone and impulses per trial; channel `noise` (no burst:
+  the false-accept control) and `RX_BENCH_WRONG_SEED=1` (the wrong-session
+  control); `RX_BENCH_TIME=1` for CPU time per variant.
+- `utils/rx_replay FILE variants modes seed`: the same variants on a
+  recording (`MERCURY_RX_DUMP`), frames delivered, by which attempt, gained
+  and lost against the first variant. This is the replay stage.
+- `utils/watterson_test --tone Hz,dBFS` and `--impulses N,dBFS[,ms]`:
+  interference on a session's channel; `tests/integration` passes them with
+  `MERCURY_CH_TONE` / `MERCURY_CH_IMPULSES` (`_FWD` / `_REV` for one
+  direction), records what each station heard with `MERCURY_TEST_RX_DUMP=1`,
+  and keeps the timing logs with `MERCURY_TEST_LOGDIR`.
+- The modem's timing log names the optional decode attempt that delivered a
+  frame and gives the session's CRC seed, which `rx_replay` needs.
+- Still to do: an FSK interferer and the inverter presets, a tone and
+  impulses in `rx_bench` under a fading preset's own noise, an MFSK path.

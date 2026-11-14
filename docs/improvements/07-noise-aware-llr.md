@@ -161,3 +161,41 @@ Later phases, each its own change:
   the estimated amplitude, so the expected gain is small; add it as one more
   variant of this attempt (erase the cells under 0.3× the median amplitude)
   and let the bench decide.
+
+## As built (2026-11-14)
+
+Findings: `docs/NOISE-WEIGHT-FINDINGS.md`.
+
+**Weights** (`MERCURY_NOISE_WEIGHT=1` / `[audio] rx_noise_weight`, decode
+path 5):
+
+- The profile has two measurements per carrier and takes the larger
+  (`ofdm_noise_profile_get()`, `ofdm.c`): the pilot residual of the design,
+  and the mean squared distance of the data symbols to their nearest
+  constellation point. The second was added because the first is blind to an
+  interferer whose phase advances by whole turns per modem frame (any
+  multiple of 9.09 Hz for the 6 ms-prefix modes: handbook pitfall 15).
+- `noise_weight_scales()` (`freedv_700.c`): `K` 2.0 against the lower median,
+  at least 8 frames in the profile (so the 4-frame control mode never
+  weights).
+- One weighted attempt, on the best rows at hand (recycled, else the
+  alternative estimate's, else stock), run **before** the unweighted
+  fallbacks when the profile singles out a carrier and not at all when it is
+  flat. The unweighted attempts still run if it fails.
+- Per-frame (time) weights, the gap profile and decode-and-subtract are not
+  built. `nv_frame` is accumulated for the first.
+
+**Notch** (step 9; `MERCURY_NOTCH=1` / `[audio] rx_notch`):
+
+- `modem/rx_notch.{c,h}`, on the captured audio in `rx_thread()` after the
+  dump and before the blanker and the tee, so every decoder gets it (control
+  frames and the MFSK floor too).
+- It does not use the gap profile the design expected (that needs proposal
+  10's gap detection). A line is a spectral bin whose **minimum** over a
+  second of 64 ms spectra stands 10 dB over the mean of its neighbourhood;
+  the frequency comes from the bin's phase advance between spectra, and a
+  6 Hz second-order notch removes it. Up to four; followed while drifting;
+  released 2 s after the line is gone.
+- Why it was needed beyond the weights: on a carrier's centre the tone
+  captures the frequency tracker, and a few dB over the signal it stops
+  acquisition (handbook pitfall 16).

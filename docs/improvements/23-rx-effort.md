@@ -127,3 +127,19 @@ decoder state or the saved buffers must be self-contained.
 - Failed-frame decode time reduced by at least half by early termination,
   with no frame lost on the bench.
 - The findings state, per machine class, which attempts fit.
+
+## As built, step 2 only (2026-11-14)
+
+Findings: `docs/RX-EFFORT-FINDINGS.md`.
+
+- Early termination: `SumProductStall()` in `mpdecode_core.c`, `struct LDPC`
+  field `early_stop`, `freedv_set_ldpc_early_stop()`,
+  `MERCURY_RX_EARLY_STOP=1` / `[audio] rx_early_stop`. It applies to every
+  decode of the instance, the stock one included.
+- The rule is 15 / 10 / **0.80**, not the 0.97 above: with 0.97 DATAC1 lost
+  3 frames of 37 at the cliff (handbook pitfall 17).
+- `rx_bench` prints the CPU time per trial of each variant with
+  `RX_BENCH_TIME=1`.
+- Not built: the three-machine timing table (step 1; x86 only), the budget,
+  the effort levels, the helper thread. The MFSK decoder has its own LDPC
+  and is not covered.

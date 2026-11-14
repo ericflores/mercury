@@ -87,3 +87,17 @@ arranged. Ask the maintainers whether a branch already exists.
 - A clipped 16QAM constellation reads differently to the SNR estimator; the
   findings saw no extra bias (−4.5 ± 0.1 raw). Re-check
   `freedv_snr_calib()` (`freedv_700.c:497`) on the as-shipped path.
+
+## As built (2026-11-14)
+
+- `freedv_set_qam16c2_tx_clip(f, on)` (`freedv_api.c`) applies the measured
+  setting (drive 2.0, gain 1.0, the mode's own `amp_scale`) and refuses any
+  mode but QAM16C2. The hook is not in the backend vtable: `fdv_open()`
+  (`modem/modem_freedv.c`) calls it on the QAM16C2 instance when the switch
+  is set, which covers the pooled instance the keydown builder uses.
+- Switch: `MERCURY_QAM16C2_CLIP=1` / `[audio] qam16c2_tx_clip = true`.
+- `tests/modem/test_tx_clip.c`; the as-shipped measurement is appended to
+  `docs/CLIPPED-QAM16C2-FINDINGS.md`: PAPR 11.62 → 6.69 dB, the same peak,
+  +4.93 dB average power.
+- Not done: steps 3 (the sweep through the switch path) and 5 (on the air);
+  the ladder threshold follow-up.

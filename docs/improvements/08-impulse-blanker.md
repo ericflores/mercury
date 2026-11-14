@@ -135,3 +135,24 @@ for spec 10.
 - modem73 ships a blanker of this kind on by default (`MODEM73-NOTES.md`):
   scale a sample down above 6× a tracked envelope, zero it above 8×. Put
   those thresholds on the bench as one of the variants.
+
+## As built (2026-11-14)
+
+Findings: `docs/BLANKER-FINDINGS.md`.
+
+- `modem/rx_blanker.{c,h}`, in `rx_thread()` after the dump and the notch,
+  before the tee. `MERCURY_BLANKER=<k>` / `[audio] rx_blanker = <k>`.
+- The start-of-burst problem is solved with **lookahead** instead of the
+  asymmetric level tracker of the design: the audio is delayed 8 ms (64
+  samples) and a sample over the threshold is judged by the lower quartile of
+  the samples 4 to 8 ms after it. Still high: something that lasts (a burst
+  arriving, a long crash); nothing is blanked and the level jumps. Back to
+  normal: an impulse; it is zeroed with what follows, 1 ms of hold after each
+  trigger. The lower quartile and not the mean, because a second impulse
+  6 ms after the first carried the mean off and the level adopted from the
+  pair let the next impulses through for a quarter of a second.
+- So a clean burst loses nothing at its start (the design accepted 2 ms),
+  and the price is 8 ms of latency when the blanker is on.
+- The 5 % per-second cap is as designed.
+- Not built: the blanked-sample map for the decoder (phase 2), the periodic
+  mode (phase 3), the modem73 soft variant, the MFSK bench.

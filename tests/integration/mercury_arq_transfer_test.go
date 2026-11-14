@@ -204,6 +204,14 @@ func TestMercuryARQTransfer(t *testing.T) {
 		}
 		cmd := exec.CommandContext(ctx, stationBin, args...)
 		cmd.Dir = repoRoot
+		// MERCURY_TEST_RX_DUMP=1 (with MERCURY_TEST_LOGDIR): each station
+		// records what its decoders were handed, A.rx.s16 and B.rx.s16 (s16le,
+		// 8 kHz), for utils/rx_replay to decode again with other receiver
+		// switches.  One file per station: MERCURY_RX_DUMP names a single
+		// file, and both stations inherit this process's environment.
+		if d := os.Getenv("MERCURY_TEST_LOGDIR"); d != "" && os.Getenv("MERCURY_TEST_RX_DUMP") != "" {
+			cmd.Env = append(os.Environ(), "MERCURY_RX_DUMP="+filepath.Join(d, name+".rx.s16"))
+		}
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
 		if err := startChild(cmd); err != nil {

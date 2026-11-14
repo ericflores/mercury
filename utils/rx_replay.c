@@ -25,6 +25,8 @@
  *                            audio before the decoder (proposal 08); the
  *                            recording is raw, as MERCURY_RX_DUMP writes it
  *                            before the blanker
+ *               nt           the automatic carrier notch over the audio,
+ *                            before the blanker (proposal 07)
  *             The first variant is the reference the others are compared to.
  *   modes     comma list of mode names, or "arq" (default): DATAC16, DATAC15,
  *             DATAC4, DATAC3, DATAC1, DATAC17, QAM16C2, the control mode and
@@ -62,6 +64,7 @@
 #include "freedv_api.h"
 #include "codec2_ofdm.h"
 #include "rx_blanker.h"
+#include "rx_notch.h"
 
 #define FS 8000
 #define MAX_VARIANTS 8
@@ -76,6 +79,7 @@ typedef struct {
   int pt;
   int nw;
   float blank;
+  int notch;
   char name[64];
 } variant_t;
 
@@ -103,12 +107,14 @@ static int parse_variant(const char *s, variant_t *v) {
   v->pt = 0;
   v->nw = 0;
   v->blank = 0.0f;
+  v->notch = 0;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -2;
     if (!strcmp(t, "stock")) continue;
     if (!strcmp(t, "pt")) { v->pt = 1; continue; }
     if (!strcmp(t, "nw")) { v->nw = 1; continue; }
+    if (!strcmp(t, "nt")) { v->notch = 1; continue; }
     if (t[0] == 'b' && t[1] >= '0' && t[1] <= '9') {
       char *end;
       double kb = strtod(t + 1, &end);
@@ -133,7 +139,7 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, auto, t4, t4f3, t4f5, cpN, pt, nw, bK\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, auto, t4, t4f3, t4f5, cpN, pt, nw, bK, nt\n", t, s);
     return -1;
   }
   return 0;
@@ -272,11 +278,20 @@ int main(int argc, char **argv) {
   short *sv[MAX_VARIANTS];
   for (int k = 0; k < nv; k++) {
     sv[k] = s;
-    if (v[k].blank > 0.0f) {
-      rx_blanker_t bl;
+    if (v[k].blank > 0.0f || v[k].notch) {
       sv[k] = malloc(sizeof(short) * (size_t)(n > 0 ? n : 1));
       if (!sv[k]) { fprintf(stderr, "out of memory\n"); return 1; }
       memcpy(sv[k], s, sizeof(short) * (size_t)n);
+    }
+    if (v[k].notch) {
+      static rx_notch_t nt;
+      rx_notch_init(&nt, true, FS);
+      rx_notch_process(&nt, sv[k], (int)n);
+      printf("variant %s: the notch engaged %llu times, released %llu\n", v[k].name,
+             (unsigned long long)nt.engaged, (unsigned long long)nt.released);
+    }
+    if (v[k].blank > 0.0f) {
+      rx_blanker_t bl;
       rx_blanker_init(&bl, v[k].blank, FS);
       rx_blanker_process(&bl, sv[k], (int)n);
       printf("variant %s: %.4f %% of the samples blanked, %llu impulses\n", v[k].name,

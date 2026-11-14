@@ -35,6 +35,12 @@
  *                      modem/rx_blanker.c) run over the audio before the
  *                      decoder, as mercury's receive thread does; b6 is the
  *                      recommended setting
+ *               nt     the automatic carrier notch (modem/rx_notch.c) run
+ *                      over the audio before the decoder (and before the
+ *                      blanker, as in mercury).  A carrier on the air has
+ *                      been there for a while when a burst arrives, so the
+ *                      notch first sees PREROLL_S seconds of the trial's
+ *                      noise and tone, which the decoder does not get
  *             e.g. stock,t4f5,t4f5+cp4,t4f5+cp20,pt,t4f3+cp4+pt
  *   tone      an unmodulated carrier at tone_hz, tone_db relative to the
  *             burst's total power
@@ -58,16 +64,18 @@
 #include "freedv_api.h"
 #include "codec2_ofdm.h"
 #include "rx_blanker.h"
+#include "rx_notch.h"
 
 #define FS 8000.0
 #define HEADROOM_PEAK 4000.0
+#define PREROLL_S 3
 
 
 static bench_rng rng = {1357911131517ULL};
 static double gauss(void) { return bench_rng_gauss(&rng); }
 static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
 
-typedef struct { int chanest; int cp; int pt; int nw; float blank; char name[64]; } variant_t;
+typedef struct { int chanest; int cp; int pt; int nw; int notch; float blank; char name[64]; } variant_t;
 
 /* Parse one variant: '+'-joined exact tokens.  0 on success. */
 static int parse_variant(const char *s, variant_t *v) {
@@ -81,6 +89,7 @@ static int parse_variant(const char *s, variant_t *v) {
   v->pt = 0;
   v->nw = 0;
   v->blank = 0.0f;
+  v->notch = 0;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -1;
@@ -92,6 +101,7 @@ static int parse_variant(const char *s, variant_t *v) {
       continue;
     }
     else if (!strcmp(t, "nw")) { v->nw = 1; continue; }
+    else if (!strcmp(t, "nt")) { v->notch = 1; continue; }
     else if (!strcmp(t, "t4")) est = OFDM_CHANEST_T4;
     else if (!strcmp(t, "t4f3")) est = OFDM_CHANEST_T4F3;
     else if (!strcmp(t, "t4f5")) est = OFDM_CHANEST_T4F5;
@@ -117,10 +127,10 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw, bK\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw, bK, nt\n", t, s);
     return -1;
   }
-  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f)) {
+  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f || v->notch)) {
     fprintf(stderr, "variant '%s': 'stock' cannot be combined\n", s);
     return -1;
   }
@@ -238,14 +248,35 @@ int main(int argc, char **argv) {
       for (int k = 0; k < nv; k++) {
         int ss = 0, got = 0;
         const short *src = buf;
+        if (v[k].blank > 0.0f || v[k].notch) {
+          memcpy(wbuf, buf, sizeof(short) * (size_t)ntot);
+          src = wbuf;
+        }
+        if (v[k].notch) {
+          /* the trial's own noise level and tone, continued backwards in
+           * time; its own generator, so the trials stay the same samples
+           * whether or not a variant asks for the notch */
+          static rx_notch_t nt;
+          static short pre[PREROLL_S * (int)FS];
+          bench_rng prng = {977ULL + (uint64_t)t};
+          rx_notch_init(&nt, true, (int)FS);
+          for (int i = 0; i < PREROLL_S * (int)FS; i++) {
+            int ti = i - PREROLL_S * (int)FS;
+            double s = sigma * bench_rng_gauss(&prng);
+            if (ta > 0.0) s += ta * cos(2.0 * M_PI * tone_hz * ti / FS + tph);
+            if (s > 32767.0) s = 32767.0;
+            if (s < -32768.0) s = -32768.0;
+            pre[i] = (short)lrint(s);
+          }
+          rx_notch_process(&nt, pre, PREROLL_S * (int)FS);
+          rx_notch_process(&nt, wbuf, ntot);
+        }
         if (v[k].blank > 0.0f) {
           /* a fresh blanker per trial: the lead of noise before the burst
            * sets its level, as the noise before a burst does on the air */
           rx_blanker_t bl;
           rx_blanker_init(&bl, v[k].blank, (int)FS);
-          memcpy(wbuf, buf, sizeof(short) * (size_t)ntot);
           rx_blanker_process(&bl, wbuf, ntot);
-          src = wbuf;
         }
         bench_run_burst(rx[k], src, ntot, 0, 0.0, out, zero_noise, NULL, &ss, &got, NULL, NULL);
         if (got && memcmp(out, payload, (size_t)nbytes - 2)) got = 0;

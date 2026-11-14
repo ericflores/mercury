@@ -200,6 +200,10 @@ void modem_freedv_set_chanstats(int on)
     g_chanstats = on ? 1 : 0;
 }
 
+/* The setting as the instances were opened with it: the receive path reads
+ * this on every call and must not go to the environment each time. */
+static int g_chanstats_on = 0;
+
 static int chanstats_setting(void)
 {
     const char *e = getenv("MERCURY_CHANSTATS");
@@ -227,7 +231,8 @@ static void *fdv_open(int mode)
         freedv_set_noise_weight(f, noise_weight_setting());
         freedv_set_ldpc_early_stop(f, early_stop_setting());
         freedv_set_decision_directed(f, decision_directed_setting());
-        freedv_set_noise_stats(f, chanstats_setting());
+        g_chanstats_on = chanstats_setting();
+        freedv_set_noise_stats(f, g_chanstats_on);
         if (mode == FREEDV_MODE_QAM16C2 && qam16c2_clip_setting())
             freedv_set_qam16c2_tx_clip(f, 1);
     }
@@ -296,7 +301,7 @@ static int fdv_rawdata_rx(void *ctx, uint8_t *bytes_out, const int16_t *demod_in
      * nvpk is the noisiest carrier against the median carrier in dB and nvhz
      * its audio frequency: a carrier or a narrow signal on the frequency
      * shows there. */
-    if (chanstats_setting())
+    if (g_chanstats_on)
     {
         int st = freedv_get_rx_status(FDV(ctx));
         struct freedv_rx_frame_stats fs;

@@ -44,6 +44,14 @@
  *                      been there for a while when a burst arrives, so the
  *                      notch first sees PREROLL_S seconds of the trial's
  *                      noise and tone, which the decoder does not get
+ *               bp     a band-pass in front of the decoder, centred on the
+ *                      mode's centre and 100 Hz wider than its occupied band
+ *                      (401-tap linear-phase FIR, delay compensated).  A
+ *                      BENCH-ONLY probe for proposal 16's phase 0: the modes
+ *                      without a receive filter (DATAC3, DATAC1) lose
+ *                      acquisition to an interferer well outside their band,
+ *                      and this says whether a plain filter, not a move,
+ *                      would already cure it.  Not in mercury.
  *               es     early termination of LDPC decodes that are going
  *                      nowhere (proposal 23), on every attempt of the variant
  *               dd     decision-directed channel estimation as the last
@@ -89,6 +97,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include "bench_common.h"
@@ -108,7 +117,7 @@ static bench_rng rng = {1357911131517ULL};
 static double gauss(void) { return bench_rng_gauss(&rng); }
 static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
 
-typedef struct { int chanest; int cp; int pt; int nw; int notch; int es; int dd; float blank; char name[64]; } variant_t;
+typedef struct { int chanest; int cp; int pt; int nw; int notch; int bp; int es; int dd; float blank; char name[64]; } variant_t;
 
 /* Parse one variant: '+'-joined exact tokens.  0 on success. */
 static int parse_variant(const char *s, variant_t *v) {
@@ -123,6 +132,7 @@ static int parse_variant(const char *s, variant_t *v) {
   v->nw = 0;
   v->blank = 0.0f;
   v->notch = 0;
+  v->bp = 0;
   v->es = 0;
   v->dd = 0;
   char *save = NULL;
@@ -137,6 +147,7 @@ static int parse_variant(const char *s, variant_t *v) {
     }
     else if (!strcmp(t, "nw")) { v->nw = 1; continue; }
     else if (!strcmp(t, "nt")) { v->notch = 1; continue; }
+    else if (!strcmp(t, "bp")) { v->bp = 1; continue; }
     else if (!strcmp(t, "es")) { v->es = 1; continue; }
     else if (!strcmp(t, "dd")) { v->dd = 1; continue; }
     else if (!strcmp(t, "t4")) est = OFDM_CHANEST_T4;
@@ -164,14 +175,53 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw, bK, nt, es, dd\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw, bK, nt, bp, es, dd\n", t, s);
     return -1;
   }
-  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f || v->notch || v->es || v->dd)) {
+  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f || v->notch || v->bp || v->es || v->dd)) {
     fprintf(stderr, "variant '%s': 'stock' cannot be combined\n", s);
     return -1;
   }
   return 0;
+}
+
+/* Occupied width of the narrow modes (docs/MODES.md), for the bp probe. */
+static double mode_width_hz(const char *name) {
+  if (!strcasecmp(name, "DATAC15") || !strcasecmp(name, "DATAC16")) return 187.0;
+  if (!strcasecmp(name, "DATAC4")) return 250.0;
+  if (!strcasecmp(name, "DATAC3")) return 562.0;
+  return 1000.0;
+}
+
+/* Linear-phase windowed-sinc band-pass of `bw` Hz around `fc`, applied in
+ * place with its delay taken out so the burst stays where it was. */
+#define BP_TAPS 401
+static void bandpass(short *x, int n, double fc, double bw) {
+  static double h[BP_TAPS];
+  static double fcs = -1.0, bws = -1.0;
+  if (fc != fcs || bw != bws) {
+    double f1 = (fc - bw / 2.0) / FS, f2 = (fc + bw / 2.0) / FS;
+    int m = BP_TAPS / 2;
+    for (int i = 0; i < BP_TAPS; i++) {
+      int d = i - m;
+      double w = 0.54 - 0.46 * cos(2.0 * M_PI * i / (BP_TAPS - 1));
+      h[i] = w * (d == 0 ? 2.0 * (f2 - f1) : (sin(2.0 * M_PI * f2 * d) - sin(2.0 * M_PI * f1 * d)) / (M_PI * d));
+    }
+    fcs = fc;
+    bws = bw;
+  }
+  short *y = malloc(sizeof(short) * (size_t)n);
+  int m = BP_TAPS / 2;
+  for (int i = 0; i < n; i++) {
+    double a = 0.0;
+    for (int j = 0; j < BP_TAPS; j++) {
+      int k = i + m - j;
+      if (k >= 0 && k < n) a += h[j] * x[k];
+    }
+    y[i] = (short)lrint(a > 32767.0 ? 32767.0 : (a < -32768.0 ? -32768.0 : a));
+  }
+  memcpy(x, y, sizeof(short) * (size_t)n);
+  free(y);
 }
 
 /* Open `mode`, at `centre` Hz when that is not 0 (RX_BENCH_CENTRE).  The
@@ -345,7 +395,7 @@ int main(int argc, char **argv) {
       for (int k = 0; k < nv; k++) {
         int ss = 0, got = 0;
         const short *src = buf;
-        if (v[k].blank > 0.0f || v[k].notch) {
+        if (v[k].blank > 0.0f || v[k].notch || v[k].bp) {
           memcpy(wbuf, buf, sizeof(short) * (size_t)ntot);
           src = wbuf;
         }
@@ -369,6 +419,7 @@ int main(int argc, char **argv) {
           rx_notch_process(&nt, pre, PREROLL_S * (int)FS);
           rx_notch_process(&nt, wbuf, ntot);
         }
+        if (v[k].bp) bandpass(wbuf, ntot, centre > 0.0 ? centre : 1500.0, mode_width_hz(argv[1]) + 100.0);
         if (v[k].blank > 0.0f) {
           /* a fresh blanker per trial: the lead of noise before the burst
            * sets its level, as the noise before a burst does on the air */

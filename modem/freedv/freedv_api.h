@@ -302,6 +302,14 @@ int freedv_get_cp_recycle(struct freedv *freedv);
  * carriers stay off.  docs/improvements/26-window-placement.md. */
 void freedv_set_profile_track(struct freedv *freedv, int on);
 int freedv_get_profile_track(struct freedv *freedv);
+/* Stop an LDPC decode that is going nowhere: once the count of satisfied
+ * parity checks has not improved for 10 iterations and sits below 97 %, the
+ * decode is abandoned instead of running to its 100-iteration limit.  That
+ * limit is where the time of a frame that fails goes, and every optional
+ * decode attempt pays it again.  0 = off (the default).
+ * docs/improvements/23-rx-effort.md. */
+void freedv_set_ldpc_early_stop(struct freedv *freedv, int on);
+int freedv_get_ldpc_early_stop(struct freedv *freedv);
 /* Noise-aware soft bits for the OFDM data modes: a per-carrier noise profile
  * is kept from the pilots of each burst; when a packet fails and the profile
  * singles out carriers (a CW carrier, an FSK signal on part of the band), it

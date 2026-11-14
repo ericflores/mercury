@@ -39,6 +39,11 @@ struct LDPC {
   int protection_mode;
   int data_bits_per_frame;
   int coded_bits_per_frame;
+
+  /* Mercury (docs/improvements/23): stop a decode that is going nowhere.
+   * 0 = run to max_iter as always (the default; the code table leaves it
+   * zero).  See SumProductStall() in mpdecode_core.c for the rule. */
+  int early_stop;
 };
 
 void encode(struct LDPC *ldpc, unsigned char ibits[], unsigned char pbits[]);

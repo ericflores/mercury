@@ -362,10 +362,51 @@ void init_c_v_nodes(struct c_node *c_nodes, int shift, int NumberParityBits,
 ///////////////////////////////////////
 /* function for doing the MP decoding */
 // Returns the iteration count
+/* Early termination (Mercury, docs/improvements/23-rx-effort.md).  A decode
+ * that will converge raises the number of satisfied parity checks iteration
+ * after iteration; one that will not stalls around a level set by the noise
+ * and stays there to max_iter, which is where the time of a failed frame
+ * goes (100 iterations against a handful for a frame that decodes).  With
+ * early_stop on, the decode is abandoned once STALL_MIN_ITERS iterations have
+ * run, the best count has not improved for STALL_ITERS iterations, and that
+ * best is below STALL_FRAC of the checks.
+ *
+ * STALL_FRAC is what decides whether frames are lost.  At the cliff a decode
+ * that ends up converging can sit between 80 % and 97 % of the checks for
+ * more than ten iterations first: with the specification's 0.97 DATAC1 lost
+ * 3 frames of 37 at +1 dB, with 0.90 it lost 3 of 30, with 0.80 none, for
+ * the same time saved on the frames that fail (their best count is under
+ * 80 %).  docs/RX-EFFORT-FINDINGS.md has the runs.
+ *
+ * LDPC_ES_MIN, LDPC_ES_STALL and LDPC_ES_FRAC in the environment override the
+ * three values, for bench sweeps only. */
+#define STALL_MIN_ITERS 15
+#define STALL_ITERS 10
+#define STALL_FRAC 0.80f
+
+static int SumProductStall(int *parityCheckCount, char DecodedBits[],
+                           struct c_node c_nodes[], struct v_node v_nodes[],
+                           int CodeLength, int NumberParityBits, int max_iter,
+                           float r_scale_factor, float q_scale_factor,
+                           int data[], int early_stop);
+
 int SumProduct(int *parityCheckCount, char DecodedBits[],
                struct c_node c_nodes[], struct v_node v_nodes[], int CodeLength,
                int NumberParityBits, int max_iter, float r_scale_factor,
                float q_scale_factor, int data[]) {
+  return SumProductStall(parityCheckCount, DecodedBits, c_nodes, v_nodes,
+                         CodeLength, NumberParityBits, max_iter,
+                         r_scale_factor, q_scale_factor, data, 0);
+}
+
+static int SumProductStall(int *parityCheckCount, char DecodedBits[],
+                           struct c_node c_nodes[], struct v_node v_nodes[],
+                           int CodeLength, int NumberParityBits, int max_iter,
+                           float r_scale_factor, float q_scale_factor,
+                           int data[], int early_stop) {
+  int best_ssum = -1, best_iter = 0;
+  (void)r_scale_factor;
+  (void)q_scale_factor;
   int result;
   int bitErrors;
   int i, j, iter;
@@ -454,6 +495,26 @@ int SumProduct(int *parityCheckCount, char DecodedBits[],
       result = iter + 1;
       break;
     }
+
+    if (early_stop) {
+      static int tune_init, tune_min = STALL_MIN_ITERS, tune_stall = STALL_ITERS;
+      static float tune_frac = STALL_FRAC;
+      if (!tune_init) {
+        tune_init = 1;
+        if (getenv("LDPC_ES_MIN")) tune_min = atoi(getenv("LDPC_ES_MIN"));
+        if (getenv("LDPC_ES_STALL")) tune_stall = atoi(getenv("LDPC_ES_STALL"));
+        if (getenv("LDPC_ES_FRAC")) tune_frac = (float)atof(getenv("LDPC_ES_FRAC"));
+      }
+      if (ssum > best_ssum) {
+        best_ssum = ssum;
+        best_iter = iter;
+      }
+      if (iter + 1 >= tune_min && iter - best_iter >= tune_stall &&
+          (float)best_ssum < tune_frac * (float)NumberParityBits) {
+        result = iter + 1;
+        break;
+      }
+    }
   }
 
   return (result);
@@ -517,9 +578,10 @@ int run_ldpc_decoder(struct LDPC *ldpc, uint8_t out_char[], float input[],
   for (i = 0; i < CodeLength; i++) DecodedBits[i] = 0;
 
   /* Call function to do the actual decoding */
-  int iter = SumProduct(parityCheckCount, DecodedBits, c_nodes, v_nodes,
-                        CodeLength, NumberParityBits, max_iter, r_scale_factor,
-                        q_scale_factor, data_int);
+  int iter = SumProductStall(parityCheckCount, DecodedBits, c_nodes, v_nodes,
+                             CodeLength, NumberParityBits, max_iter,
+                             r_scale_factor, q_scale_factor, data_int,
+                             ldpc->early_stop);
 
   for (i = 0; i < CodeLength; i++) out_char[i] = DecodedBits[i];
 

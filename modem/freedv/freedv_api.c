@@ -1771,6 +1771,17 @@ int freedv_get_profile_track(struct freedv *f) {
   return (f != NULL && f->ofdm != NULL) ? ofdm_get_profile_track(f->ofdm) : 0;
 }
 
+/* Early termination of LDPC decodes that are going nowhere
+ * (docs/improvements/23-rx-effort.md).  Applies to every decode of this
+ * instance: the stock attempt and each fallback. */
+void freedv_set_ldpc_early_stop(struct freedv *f, int on) {
+  if (f != NULL && f->ldpc != NULL) f->ldpc->early_stop = on ? 1 : 0;
+}
+
+int freedv_get_ldpc_early_stop(struct freedv *f) {
+  return (f != NULL && f->ldpc != NULL) ? f->ldpc->early_stop : 0;
+}
+
 /* Noise-aware soft bits (docs/improvements/07-noise-aware-llr.md): keep a
  * per-carrier noise profile from the pilots and, when a packet fails and the
  * profile singles out carriers, decode it once more with those carriers

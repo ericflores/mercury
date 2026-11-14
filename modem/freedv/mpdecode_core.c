@@ -388,7 +388,7 @@ static int SumProductStall(int *parityCheckCount, char DecodedBits[],
                            struct c_node c_nodes[], struct v_node v_nodes[],
                            int CodeLength, int NumberParityBits, int max_iter,
                            float r_scale_factor, float q_scale_factor,
-                           int data[], int early_stop);
+                           int data[], int early_stop, float *posterior);
 
 int SumProduct(int *parityCheckCount, char DecodedBits[],
                struct c_node c_nodes[], struct v_node v_nodes[], int CodeLength,
@@ -396,14 +396,14 @@ int SumProduct(int *parityCheckCount, char DecodedBits[],
                float q_scale_factor, int data[]) {
   return SumProductStall(parityCheckCount, DecodedBits, c_nodes, v_nodes,
                          CodeLength, NumberParityBits, max_iter,
-                         r_scale_factor, q_scale_factor, data, 0);
+                         r_scale_factor, q_scale_factor, data, 0, NULL);
 }
 
 static int SumProductStall(int *parityCheckCount, char DecodedBits[],
                            struct c_node c_nodes[], struct v_node v_nodes[],
                            int CodeLength, int NumberParityBits, int max_iter,
                            float r_scale_factor, float q_scale_factor,
-                           int data[], int early_stop) {
+                           int data[], int early_stop, float *posterior) {
   int best_ssum = -1, best_iter = 0;
   (void)r_scale_factor;
   (void)q_scale_factor;
@@ -465,6 +465,10 @@ static int SumProductStall(int *parityCheckCount, char DecodedBits[],
       if (Qi < 0) {
         DecodedBits[i] = 1;
       }
+      /* the decoder's belief about this bit after this iteration (positive:
+       * 0), for decision-directed channel estimation (Mercury,
+       * docs/improvements/20); the last iteration's values are what is left */
+      if (posterior) posterior[i] = Qi;
 
       /* now subtract to get the extrinsic information */
       for (j = 0; j < v_nodes[i].degree; j++) {
@@ -524,6 +528,14 @@ static int SumProductStall(int *parityCheckCount, char DecodedBits[],
 
 int run_ldpc_decoder(struct LDPC *ldpc, uint8_t out_char[], float input[],
                      int *parityCheckCount) {
+  return run_ldpc_decoder_post(ldpc, out_char, input, parityCheckCount, NULL);
+}
+
+/* The same, also giving the posterior soft bit of every bit of the codeword
+ * (CodeLength values, in the order of input[]; positive means 0) when
+ * posterior is not NULL. */
+int run_ldpc_decoder_post(struct LDPC *ldpc, uint8_t out_char[], float input[],
+                          int *parityCheckCount, float *posterior) {
   int max_iter, dec_type;
   float q_scale_factor, r_scale_factor;
   int max_row_weight, max_col_weight;
@@ -581,7 +593,7 @@ int run_ldpc_decoder(struct LDPC *ldpc, uint8_t out_char[], float input[],
   int iter = SumProductStall(parityCheckCount, DecodedBits, c_nodes, v_nodes,
                              CodeLength, NumberParityBits, max_iter,
                              r_scale_factor, q_scale_factor, data_int,
-                             ldpc->early_stop);
+                             ldpc->early_stop, posterior);
 
   for (i = 0; i < CodeLength; i++) out_char[i] = DecodedBits[i];
 
@@ -723,6 +735,38 @@ void symbols_to_llrs(float llr[], COMP rx_psk_symbols[], float rx_amps[],
   }
   FREE(bit_likelihood);
   FREE(symbol_likelihood);
+}
+
+/* The inverse view of symbols_to_llrs() (Mercury, docs/improvements/20): the
+ * expected constellation point of each symbol under the soft bits, with the
+ * same constellation and the same bit labelling as Somap() above (bit k of a
+ * symbol is bit bps-1-k of the point's index; a positive soft bit means 0).
+ * A symbol the soft bits are sure of comes out on a constellation point; one
+ * they know nothing about comes out near zero, and so carries no weight
+ * where the symbols are used as channel references. */
+void llrs_to_soft_symbols(COMP sym[], const float llr[], int bps, int nsyms) {
+  assert((bps == 2) || (bps == 4));
+  const COMP *S = bps == 2 ? S_matrix_qpsk : S_matrix_qam16;
+  int M = 1 << bps;
+  for (int n = 0; n < nsyms; n++) {
+    float p1[4];
+    for (int k = 0; k < bps; k++) {
+      float l = llr[bps * n + k];
+      if (l > 30.0f) l = 30.0f;
+      if (l < -30.0f) l = -30.0f;
+      p1[k] = 1.0f / (1.0f + expf(l));
+    }
+    float re = 0.0f, im = 0.0f;
+    for (int i = 0; i < M; i++) {
+      float p = 1.0f;
+      for (int k = 0; k < bps; k++)
+        p *= (i >> (bps - 1 - k)) & 1 ? p1[k] : 1.0f - p1[k];
+      re += p * S[i].real;
+      im += p * S[i].imag;
+    }
+    sym[n].real = re;
+    sym[n].imag = im;
+  }
 }
 
 /*

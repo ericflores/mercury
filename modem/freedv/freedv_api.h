@@ -302,6 +302,16 @@ int freedv_get_cp_recycle(struct freedv *freedv);
  * carriers stay off.  docs/improvements/26-window-placement.md. */
 void freedv_set_profile_track(struct freedv *freedv, int on);
 int freedv_get_profile_track(struct freedv *freedv);
+/* Decision-directed channel estimation for the OFDM data modes: when every
+ * other attempt has failed a packet, the decoder's own posterior soft bits
+ * from the best failed attempt become soft symbols, and those, weighted by
+ * how sure the decoder is of each, join the pilots as channel references for
+ * a new estimate and one more decode (decode path 6), up to two rounds.  The
+ * stock estimate rests on 2 pilots per carrier and frame; this one on those
+ * and 4 data symbols.  0 = off (the default).
+ * docs/improvements/20-decision-directed.md. */
+void freedv_set_decision_directed(struct freedv *freedv, int on);
+int freedv_get_decision_directed(struct freedv *freedv);
 /* Stop an LDPC decode that is going nowhere: once the count of satisfied
  * parity checks has not improved for 10 iterations and sits below 97 %, the
  * decode is abandoned instead of running to its 100-iteration limit.  That

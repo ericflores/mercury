@@ -235,6 +235,19 @@ struct freedv {
   COMP *rx_syms_pt;
   float *rx_amps_pt;
   int rx_decode_path;
+  /* Decision-directed attempt (docs/improvements/20): when every other
+   * attempt has failed, the best failed decode's posterior soft bits are
+   * turned into soft symbols and used, with the pilots, as channel
+   * references for one more estimate and decode.  The buffers are allocated
+   * when the feature is switched on: dd_post and dd_post_best hold the
+   * posterior of the attempt in hand and of the best failed one (payload
+   * bits), dd_syms/dd_amps the re-corrected packet.  rx_decode_path 6 =
+   * delivered by it. */
+  int dd_enable;
+  float *dd_post;
+  float *dd_post_best;
+  COMP *dd_syms;
+  float *dd_amps;
   /* Noise-weighted attempt (docs/improvements/07): the number of carriers the
    * last failed packet's noise profile singled out (0 = flat, attempt not
    * run).  rx_decode_path 5 = delivered by it. */

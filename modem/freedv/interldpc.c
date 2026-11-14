@@ -151,6 +151,43 @@ void psk_modulate_frame(int bps, COMP tx_symbols[], int codeword[], int n) {
   }
 }
 
+/* ldpc_decode_frame() that also returns the decoder's posterior soft bit for
+ * every bit of llr[] (coded_bits_per_frame values, same order, positive
+ * means 0), for decision-directed channel estimation (Mercury,
+ * docs/improvements/20).  Only the two protection modes the data modes use;
+ * returns 0, leaving post untouched, for any other. */
+int ldpc_decode_frame_post(struct LDPC *ldpc, int *parityCheckCount, int *iter,
+                           uint8_t out_char[], float llr[], float post[]) {
+  int unused_data_bits =
+      ldpc->ldpc_data_bits_per_frame - ldpc->data_bits_per_frame;
+  int i;
+
+  if (ldpc->protection_mode == LDPC_PROT_EQUAL) {
+    assert(ldpc->data_bits_per_frame == ldpc->ldpc_data_bits_per_frame);
+    *iter = run_ldpc_decoder_post(ldpc, out_char, llr, parityCheckCount, post);
+    return 1;
+  }
+  if (ldpc->protection_mode == LDPC_PROT_2020) {
+    float llr_full[ldpc->ldpc_coded_bits_per_frame];
+    float post_full[ldpc->ldpc_coded_bits_per_frame];
+    for (i = 0; i < ldpc->data_bits_per_frame; i++) llr_full[i] = llr[i];
+    for (i = ldpc->data_bits_per_frame; i < ldpc->ldpc_data_bits_per_frame; i++)
+      llr_full[i] = -100.0f;
+    for (i = ldpc->ldpc_data_bits_per_frame;
+         i < ldpc->ldpc_coded_bits_per_frame; i++)
+      llr_full[i] = llr[i - unused_data_bits];
+    *iter = run_ldpc_decoder_post(ldpc, out_char, llr_full, parityCheckCount,
+                                  post_full);
+    for (i = 0; i < ldpc->data_bits_per_frame; i++) post[i] = post_full[i];
+    for (i = ldpc->ldpc_data_bits_per_frame;
+         i < ldpc->ldpc_coded_bits_per_frame; i++)
+      post[i - unused_data_bits] = post_full[i];
+    return 1;
+  }
+  ldpc_decode_frame(ldpc, parityCheckCount, iter, out_char, llr);
+  return 0;
+}
+
 /* run LDPC decoder, taking into account the FEC protection scheme */
 void ldpc_decode_frame(struct LDPC *ldpc, int *parityCheckCount, int *iter,
                        uint8_t out_char[], float llr[]) {

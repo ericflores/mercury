@@ -204,6 +204,10 @@ void freedv_close(struct freedv *freedv) {
   FREE(freedv->rx_syms_cp);
   FREE(freedv->rx_amps_cp);
   FREE(freedv->rx_syms_pt);
+  FREE(freedv->dd_post);
+  FREE(freedv->dd_post_best);
+  FREE(freedv->dd_syms);
+  FREE(freedv->dd_amps);
   FREE(freedv->rx_amps_pt);
   if (freedv->codec2) codec2_destroy(freedv->codec2);
 
@@ -1769,6 +1773,35 @@ void freedv_set_profile_track(struct freedv *f, int on) {
 
 int freedv_get_profile_track(struct freedv *f) {
   return (f != NULL && f->ofdm != NULL) ? ofdm_get_profile_track(f->ofdm) : 0;
+}
+
+/* Decision-directed channel estimation
+ * (docs/improvements/20-decision-directed.md).  Switching it on allocates
+ * the attempt's buffers. */
+void freedv_set_decision_directed(struct freedv *f, int on) {
+  if (f == NULL || f->ofdm == NULL || f->ldpc == NULL) return;
+  if (on && f->dd_syms == NULL) {
+    int nbits = ofdm_get_bits_per_packet(f->ofdm);
+    int nsyms = nbits / f->ofdm->bps;
+    f->dd_post = (float *)CALLOC((size_t)nbits, sizeof(float));
+    f->dd_post_best = (float *)CALLOC((size_t)nbits, sizeof(float));
+    f->dd_syms = (COMP *)CALLOC((size_t)nsyms, sizeof(COMP));
+    f->dd_amps = (float *)CALLOC((size_t)nsyms, sizeof(float));
+    if (!f->dd_post || !f->dd_post_best || !f->dd_syms || !f->dd_amps) {
+      FREE(f->dd_post);
+      FREE(f->dd_post_best);
+      FREE(f->dd_syms);
+      FREE(f->dd_amps);
+      f->dd_post = f->dd_post_best = f->dd_amps = NULL;
+      f->dd_syms = NULL;
+      return;
+    }
+  }
+  f->dd_enable = on && f->dd_syms != NULL;
+}
+
+int freedv_get_decision_directed(struct freedv *f) {
+  return f != NULL ? f->dd_enable : 0;
 }
 
 /* Early termination of LDPC decodes that are going nowhere

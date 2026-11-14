@@ -36,7 +36,7 @@ first.
 | 19 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
 | 20 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
 | 21 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
-| 22 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | not measured |
+| 22 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | phase 0 measured on the bench (`docs/SUB-BAND-PHASE0-FINDINGS.md`): the notch covers a steady carrier; a modulated (FSK) interferer on the mode is recovered by nothing receiver-only and by a 500 Hz move for DATAC15/16/4 (DATAC3 also needs a receive filter); how often it happens on the air is not known (needs 10); no wire work started |
 | 23 | [24-qsy.md](24-qsy.md) | #24 | wire change, radio control | capability negotiation, busy detector, 10 | design only |
 | 24 | [25-vhf-uhf.md](25-vhf-uhf.md) | #25 | new modes and link timings | 00 (FM and wideband channel models), 15, 14, 23 | design only; **on hold** until the owner has radios fit to test with (do not start it) |
 

@@ -87,3 +87,31 @@ narrowband interference is rarely the limit, stop here.
 - With a carrier at +10 dB on 1500 Hz, DATAC15 sessions complete where stock
   sessions fall to the floor or fail.
 - No loss without interference (slot stays 0).
+
+## As built / Phase 0 (2026-11-14)
+
+Bench only; findings and tables in `docs/SUB-BAND-PHASE0-FINDINGS.md`. No
+wire change, slot table, signalling or carousel change was made.
+
+- `utils/rx_bench`: trailing arguments `fsk_hz fsk_db` (2-FSK interferer,
+  45.45 baud, 170 Hz shift, random data, its own generator, pre-rolled for
+  the notch), `RX_BENCH_CENTRE=Hz` (transmitter and receivers opened through
+  `FREEDV_MODE_DATA_CUSTOM` with the mode's own `ofdm_init_mode()` config and
+  both centres changed), and the probe token `bp` (a bench-only band-pass).
+  `utils/subband_phase0.sh` runs the grid of a mode. The custom open needed
+  nothing inside `modem/freedv/`: step 2 of the list below is, for the bench,
+  already done; for the product the instance cache and the unit tests of
+  the slots are still to do.
+- Result: a steady carrier is covered by the notch (60 of 60 at +20 dB for
+  DATAC15/16/4/3). A modulated narrow interferer on the mode is not covered
+  by `nw`, `nt` or both (0 of 60 from +10 dB for every mode) and is recovered
+  completely by a mode at 1000 or 2000 Hz for DATAC15, DATAC16 and DATAC4.
+  DATAC3 moved still loses acquisition to an interferer 10 dB over it (it
+  has no receive filter); a band-pass fixes that.
+- Separation needed (DATAC15, FSK): 300 Hz at +10 dB, 350 Hz at +20 dB, so
+  the 400 Hz slots of the design are about right for the narrow modes.
+- Open: how often such interference is what limits a real link (proposal 10
+  and on-air), the radio's passband at the outer slots, fading, other
+  modulations. The decision with the maintainers (step 1) is still to be
+  taken; a receive filter for DATAC3 and DATAC1 is a possible receiver-only
+  step on its own.

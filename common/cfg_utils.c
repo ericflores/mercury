@@ -74,6 +74,7 @@ void cfg_set_defaults(mercury_config *cfg)
     cfg->rx_notch              = false;
     cfg->rx_early_stop         = false;
     cfg->rx_decision_directed  = false;
+    cfg->chanstats             = false;
     cfg->qam16c2_tx_clip       = false;
     cfg->tx_delay_ms           = 10;
     cfg->retry_stagger_ms            = ARQ_RETRY_STAGGER_MS_DEFAULT;
@@ -489,6 +490,8 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
     cfg->rx_notch = (bool) b;
     b = iniparser_getboolean(ini, CFG_KEY_RX_EARLY_STOP, cfg->rx_early_stop ? 1 : 0);
     cfg->rx_early_stop = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_CHANSTATS, cfg->chanstats ? 1 : 0);
+    cfg->chanstats = (bool) b;
     b = iniparser_getboolean(ini, CFG_KEY_RX_DECISION_DIRECTED, cfg->rx_decision_directed ? 1 : 0);
     cfg->rx_decision_directed = (bool) b;
     b = iniparser_getboolean(ini, CFG_KEY_QAM16C2_TX_CLIP, cfg->qam16c2_tx_clip ? 1 : 0);
@@ -586,6 +589,7 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
     fprintf(f, "ui_tls_cert = %s\n",      cfg->tls_cert);
     fprintf(f, "ui_tls_key = %s\n",       cfg->tls_key);
     fprintf(f, "waterfall_enabled = %s\n", cfg->waterfall_enabled ? "true" : "false");
+    fprintf(f, "chanstats = %s\n",       cfg->chanstats ? "true" : "false");
     cfg_escape_str(escaped, sizeof(escaped), cfg->input_device);
     fprintf(f, "input_device = \"%s\"\n",  escaped);
 

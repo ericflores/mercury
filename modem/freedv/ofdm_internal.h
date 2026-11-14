@@ -246,6 +246,7 @@ struct OFDM {
    * The packet receiver turns the profile into per-carrier weights for one
    * more decode attempt.  Nothing the other paths use is written from it. */
   int noise_weight;
+  int nv_stats;      /* keep the profile for telemetry though the weights are off */
   float *nv_carrier; /* nc + 2 */
   float *nv_data;    /* nc + 2 */
   float *nv_frame;   /* np */

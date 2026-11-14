@@ -188,6 +188,26 @@ static int decision_directed_setting(void)
     return e[0] == '1';
 }
 
+/* Channel telemetry (docs/improvements/10, first part): one "chanstats:"
+ * line in the timing log for every OFDM packet the receiver finishes,
+ * decoded or not.  It changes nothing in what is decoded.  OFF unless asked
+ * for: main:chanstats in the ini (modem_freedv_set_chanstats(), before the
+ * instances are opened) or MERCURY_CHANSTATS=1, which wins when set. */
+static int g_chanstats = 0;
+
+void modem_freedv_set_chanstats(int on)
+{
+    g_chanstats = on ? 1 : 0;
+}
+
+static int chanstats_setting(void)
+{
+    const char *e = getenv("MERCURY_CHANSTATS");
+    if (e && *e)
+        return e[0] == '1';
+    return g_chanstats;
+}
+
 static void *fdv_open(int mode)
 {
     /* FSK_LDPC needs an advanced open (was open_freedv_mode_locked in modem.c).
@@ -207,6 +227,7 @@ static void *fdv_open(int mode)
         freedv_set_noise_weight(f, noise_weight_setting());
         freedv_set_ldpc_early_stop(f, early_stop_setting());
         freedv_set_decision_directed(f, decision_directed_setting());
+        freedv_set_noise_stats(f, chanstats_setting());
         if (mode == FREEDV_MODE_QAM16C2 && qam16c2_clip_setting())
             freedv_set_qam16c2_tx_clip(f, 1);
     }
@@ -269,6 +290,21 @@ static int fdv_rawdata_rx(void *ctx, uint8_t *bytes_out, const int16_t *demod_in
         if (path >= 2)
             HLOGT("modem-rx", "rx decode path %d (mode %d, %d bytes)", path,
                   freedv_get_mode(FDV(ctx)), n);
+    }
+    /* Telemetry: one line per packet finished, decoded or not.  key=value,
+     * fixed prefix, so a script can gather a session (utils/onair_logs.py).
+     * nvpk is the noisiest carrier against the median carrier in dB and nvhz
+     * its audio frequency: a carrier or a narrow signal on the frequency
+     * shows there. */
+    if (chanstats_setting())
+    {
+        int st = freedv_get_rx_status(FDV(ctx));
+        struct freedv_rx_frame_stats fs;
+        if ((st & (FREEDV_RX_BITS | FREEDV_RX_BIT_ERRORS)) && freedv_get_rx_frame_stats(FDV(ctx), &fs))
+            HLOGT("modem-rx",
+                  "chanstats: mode=%d ok=%d path=%d snr=%.1f foff=%.1f pcc=%d/%d it=%d nvpk=%.1f nvhz=%.0f nvflag=%d",
+                  freedv_get_mode(FDV(ctx)), fs.ok, fs.path, (double)fs.snr_db, (double)fs.foff_hz, fs.pcc, fs.npc,
+                  fs.iters, (double)fs.noise_peak_db, (double)fs.noise_peak_hz, fs.noise_flagged);
     }
     return n;
 }

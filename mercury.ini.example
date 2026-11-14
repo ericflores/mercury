@@ -93,6 +93,16 @@ log_max_mb = 20
 ; FreeDV modem verbosity level, 0 to 3 (default: 0)
 freedv_verbosity = 0
 
+; Channel telemetry (issue #10): one "chanstats:" line in the log file (-L)
+; for every OFDM frame the receiver finishes, decoded or not: mode, CRC ok,
+; which decode attempt delivered it, SNR estimate, frequency offset, parity
+; checks satisfied, decoder iterations, and the noisiest carrier (how far
+; over the median carrier, and its audio frequency: a carrier or a narrow
+; signal sitting on the frequency shows there).  It changes nothing in what
+; is decoded.  true or false (default false).  MERCURY_CHANSTATS=1 overrides
+; it.
+chanstats = false
+
 [ptt]
 
 ; PTT backend: none, hamlib, serial, cm108, or hermes_shm (default: none).

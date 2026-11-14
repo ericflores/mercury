@@ -302,6 +302,28 @@ int freedv_get_cp_recycle(struct freedv *freedv);
  * carriers stay off.  docs/improvements/26-window-placement.md. */
 void freedv_set_profile_track(struct freedv *freedv, int on);
 int freedv_get_profile_track(struct freedv *freedv);
+/* What the receiver knows about the packet it has just finished, decoded or
+ * not, for telemetry (docs/improvements/10-channel-telemetry.md).  Valid
+ * after a freedv_rawdatarx() call whose rx status has FREEDV_RX_BITS or
+ * FREEDV_RX_BIT_ERRORS.  The noise fields need freedv_set_noise_stats() (or
+ * the noise weights) on; without it they are zero. */
+struct freedv_rx_frame_stats {
+  int ok;              /* CRC passed */
+  int path;            /* decode attempt that delivered it (see
+                          freedv_get_rx_decode_path) */
+  int pcc, npc;        /* parity checks satisfied by the decode kept, of npc */
+  int iters;           /* its LDPC iterations */
+  float snr_db;        /* the modem's SNR estimate */
+  float foff_hz;       /* tracked frequency offset */
+  int noise_flagged;   /* carriers the noise weights singled out (0 if off) */
+  float noise_peak_db; /* noisiest carrier over the median carrier, dB */
+  float noise_peak_hz; /* that carrier's audio frequency */
+};
+int freedv_get_rx_frame_stats(struct freedv *freedv,
+                              struct freedv_rx_frame_stats *st);
+/* Keep the per-carrier noise profile for telemetry without the weighted
+ * decode attempt (freedv_set_noise_weight keeps it too). */
+void freedv_set_noise_stats(struct freedv *freedv, int on);
 /* Decision-directed channel estimation for the OFDM data modes: when every
  * other attempt has failed a packet, the decoder's own posterior soft bits
  * from the best failed attempt become soft symbols, and those, weighted by

@@ -1115,6 +1115,10 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
           for (int bi = 0; bi < n; bi++) fprintf(stderr, " %02x", rx_bytes[bi]);
           fprintf(stderr, "\n");
         }
+        f->rx_last_pcc = parityCheckCount;
+        f->rx_last_npc = ldpc->NumberParityBits;
+        f->rx_last_iter = iter;
+        f->rx_last_ok = crc_ok;
         // we need a valid CRC to declare a data packet valid
         f->rx_crc_seeded = crc_class == 2;
         if (crc_ok)

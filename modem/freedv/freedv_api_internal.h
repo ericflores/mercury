@@ -248,6 +248,13 @@ struct freedv {
   float *dd_post_best;
   COMP *dd_syms;
   float *dd_amps;
+  /* The last completed packet's decode, for telemetry
+   * (freedv_get_rx_frame_stats): parity checks satisfied, their number, and
+   * the iterations of the decode that was kept. */
+  int rx_last_pcc;
+  int rx_last_npc;
+  int rx_last_iter;
+  int rx_last_ok;
   /* Noise-weighted attempt (docs/improvements/07): the number of carriers the
    * last failed packet's noise profile singled out (0 = flat, attempt not
    * run).  rx_decode_path 5 = delivered by it. */

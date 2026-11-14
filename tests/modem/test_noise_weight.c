@@ -260,6 +260,57 @@ static void test_tone_rescued(void)
     TEST_ASSERT_TRUE(t.on_path5 >= t.on - t.off);
 }
 
+/* Telemetry: with only freedv_set_noise_stats() on (no weighted attempt) the
+ * frame statistics name the carrier next to the tone, and the receiver
+ * delivers what the stock one does, by the stock path. */
+static void test_frame_stats(void)
+{
+    int mode = FREEDV_MODE_DATAC1;
+    struct freedv *tx = freedv_open(mode), *rx = open_rx(mode, 0);
+    freedv_set_frames_per_burst(tx, 1);
+    freedv_set_noise_stats(rx, 1);
+    TEST_ASSERT_EQUAL_INT(0, freedv_get_noise_weight(rx));
+    int cap = 4 * freedv_get_n_tx_modem_samples(tx) + 16000;
+    short *buf = malloc(sizeof(short) * (size_t)cap);
+    unsigned char payload[2048], out[2048];
+    rng_s = 20260712ULL;
+    for (int with_tone = 0; with_tone < 2; with_tone++) {
+        int total = make_trial(tx, 15.0, TONE_HZ, with_tone ? -9.0 : -99.0, buf, payload);
+        struct freedv_rx_frame_stats fs;
+        int seen = 0, pos = 0;
+        freedv_set_sync(rx, FREEDV_SYNC_UNSYNC);
+        while (pos < total) {
+            int nin = freedv_nin(rx);
+            if (pos + nin > total) break;
+            (void)freedv_rawdatarx(rx, out, buf + pos);
+            pos += nin;
+            if (freedv_get_rx_status(rx) & (FREEDV_RX_BITS | FREEDV_RX_BIT_ERRORS)) {
+                TEST_ASSERT_EQUAL_INT(1, freedv_get_rx_frame_stats(rx, &fs));
+                seen = 1;
+                break;
+            }
+        }
+        TEST_ASSERT_TRUE_MESSAGE(seen, "no packet completed");
+        TEST_ASSERT_EQUAL_INT(1, fs.ok);
+        TEST_ASSERT_EQUAL_INT(0, fs.path);
+        TEST_ASSERT_EQUAL_INT(fs.npc, fs.pcc);
+        TEST_ASSERT_TRUE(fs.npc > 0 && fs.iters > 0);
+        TEST_ASSERT_EQUAL_INT(0, fs.noise_flagged);
+        printf("    stats %s tone: snr %.1f dB, foff %.2f Hz, %d iterations, noisiest carrier +%.1f dB at %.0f Hz\n",
+               with_tone ? "with" : "without", (double)fs.snr_db, (double)fs.foff_hz, fs.iters,
+               (double)fs.noise_peak_db, (double)fs.noise_peak_hz);
+        if (with_tone) {
+            TEST_ASSERT_TRUE(fs.noise_peak_db > 6.0f);
+            TEST_ASSERT_TRUE(fs.noise_peak_hz > 1600.0f && fs.noise_peak_hz < 1700.0f);
+        } else {
+            TEST_ASSERT_TRUE(fs.noise_peak_db < 4.0f);
+        }
+    }
+    free(buf);
+    freedv_close(tx);
+    freedv_close(rx);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -268,5 +319,6 @@ int main(void)
     RUN_TEST(test_neutral_without_interference);
     RUN_TEST(test_strong_signal_untouched);
     RUN_TEST(test_tone_rescued);
+    RUN_TEST(test_frame_stats);
     return UNITY_END();
 }

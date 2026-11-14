@@ -1775,6 +1775,48 @@ int freedv_get_profile_track(struct freedv *f) {
   return (f != NULL && f->ofdm != NULL) ? ofdm_get_profile_track(f->ofdm) : 0;
 }
 
+void freedv_set_noise_stats(struct freedv *f, int on) {
+  if (f != NULL && f->ofdm != NULL) ofdm_set_noise_stats(f->ofdm, on);
+}
+
+/* Telemetry for the packet just finished
+ * (docs/improvements/10-channel-telemetry.md).  Returns 0 for a mode that is
+ * not an OFDM data mode. */
+int freedv_get_rx_frame_stats(struct freedv *f,
+                              struct freedv_rx_frame_stats *st) {
+  if (f == NULL || f->ofdm == NULL || f->ldpc == NULL || st == NULL) return 0;
+  struct OFDM *ofdm = f->ofdm;
+  memset(st, 0, sizeof(*st));
+  st->ok = f->rx_last_ok;
+  st->path = f->rx_decode_path;
+  st->pcc = f->rx_last_pcc;
+  st->npc = f->rx_last_npc;
+  st->iters = f->rx_last_iter;
+  st->snr_db = f->snr_est;
+  st->foff_hz = ofdm->foff_est_hz;
+  st->noise_flagged = f->rx_noise_flagged;
+  float v[ofdm->nc];
+  if (ofdm_noise_profile_get(ofdm, v)) {
+    float srt[ofdm->nc];
+    int nc = ofdm->nc, arg = 0;
+    for (int c = 0; c < nc; c++) {
+      srt[c] = v[c];
+      if (v[c] > v[arg]) arg = c;
+    }
+    for (int a = 1; a < nc; a++)
+      for (int b = a; b > 0 && srt[b] < srt[b - 1]; b--) {
+        float t = srt[b];
+        srt[b] = srt[b - 1];
+        srt[b - 1] = t;
+      }
+    float med = srt[(nc - 1) / 2];
+    if (med > 0.0f) st->noise_peak_db = 10.0f * log10f(v[arg] / med);
+    /* carriers are one symbol rate apart, centred on rx_centre */
+    st->noise_peak_hz = ofdm->rx_centre + ((float)arg - 0.5f * (float)(nc - 1)) * ofdm->rs;
+  }
+  return 1;
+}
+
 /* Decision-directed channel estimation
  * (docs/improvements/20-decision-directed.md).  Switching it on allocates
  * the attempt's buffers. */

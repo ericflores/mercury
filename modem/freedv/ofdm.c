@@ -402,6 +402,7 @@ struct OFDM *ofdm_create(const struct OFDM_CONFIG *config) {
   ofdm->chanest_slope = 0.0f;
 
   ofdm->noise_weight = 0;
+  ofdm->nv_stats = 0;
   ofdm->nv_n = 0;
   ofdm->nv_dn = 0;
   ofdm->nv_carrier = CALLOC(ofdm->nc + 2, sizeof(float));
@@ -1869,6 +1870,9 @@ void ofdm_set_noise_weight(struct OFDM *ofdm, int on) {
 
 int ofdm_get_noise_weight(struct OFDM *ofdm) { return ofdm->noise_weight; }
 
+/* Keep the noise profile for telemetry without the weighted attempt. */
+void ofdm_set_noise_stats(struct OFDM *ofdm, int on) { ofdm->nv_stats = on ? 1 : 0; }
+
 /* The noise profile (docs/improvements/07-noise-aware-llr.md).  For carrier
  * i, with h the received pilot times the conjugate of the transmitted one:
  *
@@ -2041,7 +2045,8 @@ static float ofdm_noise_data_err(const struct OFDM *ofdm, complex float rx_corr,
  * larger of the pilot and the data measurements.  Returns 0 when there is
  * none yet. */
 int ofdm_noise_profile_get(const struct OFDM *ofdm, float *v) {
-  if (!ofdm->noise_weight || ofdm->nv_n < 1 || ofdm->nv_dn < 1) return 0;
+  if (!(ofdm->noise_weight || ofdm->nv_stats) || ofdm->nv_n < 1 || ofdm->nv_dn < 1)
+    return 0;
   for (int c = 0; c < ofdm->nc; c++) {
     float vp = ofdm->nv_carrier[c + 1] / ofdm->nv_n;
     float vd = ofdm->nv_data[c + 1] / ofdm->nv_dn;
@@ -2464,7 +2469,8 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
 
   /* Not in a replay: it runs on a copy of this struct, which shares the
    * accumulators, and the profile is of the live pass. */
-  if (ofdm->noise_weight && !ofdm->pt_replay) ofdm_noise_profile(ofdm);
+  if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay)
+    ofdm_noise_profile(ofdm);
 
   float aphase_alt[ofdm->nc + 2];
   float aamp_alt[ofdm->nc + 2];
@@ -2522,7 +2528,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
        */
       ofdm->rx_amp[(rr * ofdm->nc) + (i - 1)] = aamp_est_pilot[i];
       sum_amp += aamp_est_pilot[i];
-      if (ofdm->noise_weight && !ofdm->pt_replay)
+      if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay)
         ofdm->nv_data[i] += ofdm_noise_data_err(ofdm, rx_corr, aamp_est_pilot[i]);
 
       if (ofdm->chanest_alt) {
@@ -2550,7 +2556,8 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
     }
   }
 
-  if (ofdm->noise_weight && !ofdm->pt_replay) ofdm->nv_dn += ofdm->rowsperframe;
+  if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay)
+    ofdm->nv_dn += ofdm->rowsperframe;
 
   /* update mean amplitude estimate for LDPC decoder scaling */
 

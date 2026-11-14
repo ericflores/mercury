@@ -151,6 +151,7 @@ void ofdm_set_cp_recycle(struct OFDM *, int guard_samples);
 int ofdm_get_cp_recycle(struct OFDM *);
 void ofdm_set_noise_weight(struct OFDM *, int on);
 int ofdm_get_noise_weight(struct OFDM *);
+void ofdm_set_noise_stats(struct OFDM *, int on);
 int ofdm_noise_profile_get(const struct OFDM *, float *per_carrier);
 /* Window placement from the pilots' delay profile: a last decode attempt that
  * demodulates the burst again with the FFT window and the frame grid following

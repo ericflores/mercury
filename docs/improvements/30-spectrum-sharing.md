@@ -38,6 +38,16 @@ its passband, and stop transmitting on top of that signal.
   one). Its structure is the model for the detector here: a spectrum every
   64 ms, a hold over time, engage and release thresholds, "never engages
   on Mercury's own signals" as a unit test.
+- There is already a channel-busy detector (`modem/channel_busy.{c,h}`,
+  off by default): from the spectrum computed for the waterfall, averaged
+  in 150 Hz bands over 300 to 2700 Hz, with a tracked noise floor,
+  hysteresis and a hold-off after the station's own transmissions; a pure,
+  clock-injected state machine with unit tests
+  (`tests/modem/test_channel_busy.c`). It answers "is anything there" for
+  the whole passband and is not run during a session. The occupancy
+  measurement here asks "where", per band, during a session's gaps: reuse
+  its spectrum, its floor tracking and its test pattern rather than write a
+  second detector from nothing.
 - Where audio pre-processing sits: `rx_thread()` in `modem/modem.c`, after
   the optional recording: notch (`rx_notch_process`, `:3513`), blanker
   (`rx_blanker_process`, `:3529`), then the decoders. A band-stop belongs

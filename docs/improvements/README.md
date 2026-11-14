@@ -179,6 +179,11 @@ is in `[audio]`. "Token" is the name in `utils/rx_bench` and
 | 23 | `MERCURY_RX_EARLY_STOP=1` | `rx_early_stop = true` | abandon LDPC decodes that are going nowhere (cheaper, not better) | `es` |
 | 02 | `MERCURY_QAM16C2_CLIP=1` | `qam16c2_tx_clip = true` | clip QAM16C2 on transmit: same peak, 4.9 dB more average power | (see `utils/qam16_papr_sweep`) |
 
+For a trial, `MERCURY_RX_ALL=1` (or `[audio] rx_improvements = true`) turns
+on every receiver-only switch of this table at the setting shown. A
+feature's own environment variable still decides for that feature, on or
+off. The transmit-side switch is not part of it.
+
 The order of the decode attempts on a packet whose stock decode failed:
 HARQ combine (where enabled), noise-weighted (only when the profile singles
 out a carrier), alternative estimate, recycled prefix, profile replay,

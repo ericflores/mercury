@@ -337,6 +337,13 @@ void freedv_set_freq_search_fine(struct freedv *freedv, float hz);
  * utils/qam16_papr_sweep.c. */
 void freedv_set_tx_clip_config(struct freedv *freedv, bool clip_en,
                                float gain1, float gain2, float amp_scale);
+/* QAM16C2 transmit clipping at the measured setting (drive 2.0, gain 1.0):
+ * PAPR 11.4 -> 6.7 dB, so a peak-limited transmitter radiates about 4.7 dB
+ * more average power on the top rung.  Transmit side only: any receiver
+ * decodes it.  0 = off (the default, the mode as it has always been sent).
+ * Returns 1 for a QAM16C2 instance, 0 (and does nothing) for any other.
+ * docs/CLIPPED-QAM16C2-FINDINGS.md, docs/improvements/02-qam16c2-tx-clip.md. */
+int freedv_set_qam16c2_tx_clip(struct freedv *freedv, int on);
 void freedv_pack(unsigned char *bytes, unsigned char *bits, int nbits);
 void freedv_unpack(unsigned char *bits, unsigned char *bytes, int nbits);
 unsigned short freedv_crc16_unpacked(unsigned char *bits, int nbits);

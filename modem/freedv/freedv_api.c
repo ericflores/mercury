@@ -1846,3 +1846,15 @@ void freedv_set_tx_clip_config(struct freedv *f, bool clip_en, float gain1,
   if (f != NULL && f->ofdm != NULL)
     ofdm_set_tx_clip_config(f->ofdm, clip_en, gain1, gain2, amp_scale);
 }
+
+/* QAM16C2's transmit clipping at the one setting that was measured
+ * (docs/CLIPPED-QAM16C2-FINDINGS.md): drive 2.0, gain 1.0, the mode's own
+ * amplitude scale.  The two gains are not parameters: 2.5 loses under
+ * fading and 3.0 destroys the mode.  Returns 1 if f is a QAM16C2 instance
+ * (and the setting was applied), 0 otherwise: every other mode is left as
+ * it is. */
+int freedv_set_qam16c2_tx_clip(struct freedv *f, int on) {
+  if (f == NULL || f->ofdm == NULL || f->mode != FREEDV_MODE_QAM16C2) return 0;
+  ofdm_set_tx_clip_config(f->ofdm, on != 0, 2.0f, 1.0f, f->ofdm->amp_scale);
+  return 1;
+}

@@ -19,7 +19,7 @@ lose a frame the stock receiver decodes, on the audio of a real session?
   sessions, decoded again offline by both receivers, the switches gained 76
   frames and lost 0.
 - **No wrong frame is accepted.** With every switch on, the bench accepted
-  no frame out of noise (9900 trials) and none of 3178 bursts of another
+  no frame out of noise (7900 trials) and none of 3178 bursts of another
   session; neither did the stock receiver.
 - **Where the channel is the problem, sessions finish several times
   sooner**; where it is not, nothing changes:

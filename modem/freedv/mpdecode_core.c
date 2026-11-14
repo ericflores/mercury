@@ -383,6 +383,12 @@ void init_c_v_nodes(struct c_node *c_nodes, int shift, int NumberParityBits,
 #define STALL_MIN_ITERS 15
 #define STALL_ITERS 10
 #define STALL_FRAC 0.80f
+/* Only the long codes (DATAC1's 4096 checks, DATAC17's and QAM16C2's 6480).
+ * On the short ones the count of satisfied checks is too noisy to tell a
+ * decode that will converge from one that will not: with the rule on, DATAC3
+ * (1024 checks) lost 11 frames of 127 at -4 dB and DATAC15 11 of 93 at
+ * -11 dB, and their decodes are the cheap ones anyway. */
+#define STALL_MIN_PARITY 2048
 
 static int SumProductStall(int *parityCheckCount, char DecodedBits[],
                            struct c_node c_nodes[], struct v_node v_nodes[],
@@ -500,7 +506,7 @@ static int SumProductStall(int *parityCheckCount, char DecodedBits[],
       break;
     }
 
-    if (early_stop) {
+    if (early_stop && NumberParityBits >= STALL_MIN_PARITY) {
       static int tune_init, tune_min = STALL_MIN_ITERS, tune_stall = STALL_ITERS;
       static float tune_frac = STALL_FRAC;
       if (!tune_init) {

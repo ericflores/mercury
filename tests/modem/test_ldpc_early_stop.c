@@ -4,7 +4,8 @@
  * What must hold:
  *  - off unless asked for: a decode of noise runs to the code's iteration
  *    limit, as always;
- *  - on, a decode of noise is abandoned within 30 iterations;
+ *  - on, a decode of noise is abandoned within 30 iterations on the long
+ *    codes, and runs to the limit as always on a short one;
  *  - on, a codeword that decodes comes out the same, in the same number of
  *    iterations, as with it off (the rule never fires on a decode that is
  *    converging).
@@ -77,7 +78,11 @@ static void test_noise_stops_early_only_when_on(void)
             snprintf(msg, sizeof(msg), "%s: noise ran %d iterations off, %d on (limit %d)", CODES[c], it_off, it_on,
                      ldpc.max_iter);
             TEST_ASSERT_EQUAL_INT_MESSAGE(ldpc.max_iter, it_off, msg);
-            TEST_ASSERT_TRUE_MESSAGE(it_on <= 30, msg);
+            /* the rule is for the long codes; a short one runs to its limit */
+            if (ldpc.NumberParityBits >= 2048)
+                TEST_ASSERT_TRUE_MESSAGE(it_on <= 30, msg);
+            else
+                TEST_ASSERT_EQUAL_INT_MESSAGE(ldpc.max_iter, it_on, msg);
         }
         free(llr);
         free(out);

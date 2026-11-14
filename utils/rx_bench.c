@@ -41,6 +41,8 @@
  *                      been there for a while when a burst arrives, so the
  *                      notch first sees PREROLL_S seconds of the trial's
  *                      noise and tone, which the decoder does not get
+ *               es     early termination of LDPC decodes that are going
+ *                      nowhere (proposal 23), on every attempt of the variant
  *             e.g. stock,t4f5,t4f5+cp4,t4f5+cp20,pt,t4f3+cp4+pt
  *   tone      an unmodulated carrier at tone_hz, tone_db relative to the
  *             burst's total power
@@ -58,6 +60,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "bench_common.h"
 #include "chanutil.h"
@@ -75,7 +78,7 @@ static bench_rng rng = {1357911131517ULL};
 static double gauss(void) { return bench_rng_gauss(&rng); }
 static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
 
-typedef struct { int chanest; int cp; int pt; int nw; int notch; float blank; char name[64]; } variant_t;
+typedef struct { int chanest; int cp; int pt; int nw; int notch; int es; float blank; char name[64]; } variant_t;
 
 /* Parse one variant: '+'-joined exact tokens.  0 on success. */
 static int parse_variant(const char *s, variant_t *v) {
@@ -90,6 +93,7 @@ static int parse_variant(const char *s, variant_t *v) {
   v->nw = 0;
   v->blank = 0.0f;
   v->notch = 0;
+  v->es = 0;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -1;
@@ -102,6 +106,7 @@ static int parse_variant(const char *s, variant_t *v) {
     }
     else if (!strcmp(t, "nw")) { v->nw = 1; continue; }
     else if (!strcmp(t, "nt")) { v->notch = 1; continue; }
+    else if (!strcmp(t, "es")) { v->es = 1; continue; }
     else if (!strcmp(t, "t4")) est = OFDM_CHANEST_T4;
     else if (!strcmp(t, "t4f3")) est = OFDM_CHANEST_T4F3;
     else if (!strcmp(t, "t4f5")) est = OFDM_CHANEST_T4F5;
@@ -127,10 +132,10 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw, bK, nt\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw, bK, nt, es\n", t, s);
     return -1;
   }
-  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f || v->notch)) {
+  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f || v->notch || v->es)) {
     fprintf(stderr, "variant '%s': 'stock' cannot be combined\n", s);
     return -1;
   }
@@ -171,6 +176,7 @@ int main(int argc, char **argv) {
     freedv_set_cp_recycle(rx[k], v[k].cp);
     freedv_set_profile_track(rx[k], v[k].pt);
     freedv_set_noise_weight(rx[k], v[k].nw);
+    freedv_set_ldpc_early_stop(rx[k], v[k].es);
     if (freedv_get_profile_track(rx[k]) != v[k].pt) {
       fprintf(stderr, "variant '%s': %s has too few carriers for profile tracking\n", v[k].name, argv[1]);
       return 1;
@@ -201,6 +207,7 @@ int main(int argc, char **argv) {
 
   for (double x = lo; x <= hi + 1e-6; x += step) {
     int acq[16] = {0}, del[16] = {0}, uni = 0;
+    double cpu[16] = {0};
     double meas_sum = 0.0;
     chanutil_t *ch = chan != CHAN_AWGN ? chanutil_open(chan, (float)x, 1234u) : NULL;
     for (int t = 0; t < trials; t++) {
@@ -278,7 +285,9 @@ int main(int argc, char **argv) {
           rx_blanker_init(&bl, v[k].blank, (int)FS);
           rx_blanker_process(&bl, wbuf, ntot);
         }
+        clock_t c0 = clock();
         bench_run_burst(rx[k], src, ntot, 0, 0.0, out, zero_noise, NULL, &ss, &got, NULL, NULL);
+        cpu[k] += (double)(clock() - c0) / CLOCKS_PER_SEC;
         if (got && memcmp(out, payload, (size_t)nbytes - 2)) got = 0;
         acq[k] += ss; del[k] += got; any |= got;
       }
@@ -287,7 +296,13 @@ int main(int argc, char **argv) {
     if (ch) chanutil_close(ch);
     printf("%+7.1f  %+7.2f ", x, meas_sum / trials);
     for (int k = 0; k < nv; k++) printf("    %3d/%-3d  ", acq[k], del[k]);
-    printf("   any %3d\n", uni);
+    printf("   any %3d", uni);
+    if (getenv("RX_BENCH_TIME")) {
+      /* CPU seconds per trial spent in each variant's receiver */
+      printf("   cpu/trial");
+      for (int k = 0; k < nv; k++) printf(" %.3f", cpu[k] / trials);
+    }
+    printf("\n");
     fflush(stdout);
   }
   for (int k = 0; k < nv; k++) freedv_close(rx[k]);

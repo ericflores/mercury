@@ -27,6 +27,8 @@
  *                            before the blanker
  *               nt           the automatic carrier notch over the audio,
  *                            before the blanker (proposal 07)
+ *               es           early termination of LDPC decodes that are
+ *                            going nowhere (proposal 23)
  *             The first variant is the reference the others are compared to.
  *   modes     comma list of mode names, or "arq" (default): DATAC16, DATAC15,
  *             DATAC4, DATAC3, DATAC1, DATAC17, QAM16C2, the control mode and
@@ -80,6 +82,7 @@ typedef struct {
   int nw;
   float blank;
   int notch;
+  int es;
   char name[64];
 } variant_t;
 
@@ -108,6 +111,7 @@ static int parse_variant(const char *s, variant_t *v) {
   v->nw = 0;
   v->blank = 0.0f;
   v->notch = 0;
+  v->es = 0;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -2;
@@ -115,6 +119,7 @@ static int parse_variant(const char *s, variant_t *v) {
     if (!strcmp(t, "pt")) { v->pt = 1; continue; }
     if (!strcmp(t, "nw")) { v->nw = 1; continue; }
     if (!strcmp(t, "nt")) { v->notch = 1; continue; }
+    if (!strcmp(t, "es")) { v->es = 1; continue; }
     if (t[0] == 'b' && t[1] >= '0' && t[1] <= '9') {
       char *end;
       double kb = strtod(t + 1, &end);
@@ -139,7 +144,7 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, auto, t4, t4f3, t4f5, cpN, pt, nw, bK, nt\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, auto, t4, t4f3, t4f5, cpN, pt, nw, bK, nt, es\n", t, s);
     return -1;
   }
   return 0;
@@ -200,6 +205,7 @@ static void decode_file(int mode, const variant_t *v, uint16_t seed, const short
   freedv_set_cp_recycle(f, v->cp);
   freedv_set_profile_track(f, v->pt); /* refused by modes of fewer than 9 carriers */
   freedv_set_noise_weight(f, v->nw);
+  freedv_set_ldpc_early_stop(f, v->es);
 
   int nbytes = freedv_get_bits_per_modem_frame(f) / 8;
   unsigned char *out = malloc((size_t)nbytes + 8);

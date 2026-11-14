@@ -221,6 +221,18 @@ rx_blanker = 0
 ; overrides it.
 rx_notch = false
 
+; Abandon an LDPC decode that is going nowhere (issue #23).  A frame that
+; fails spends the decoder's full 100 iterations finding that out (about
+; 100 ms for DATAC1 and 230 ms for QAM16C2 on a desktop core, several times
+; that on a Raspberry Pi), and each optional decode attempt above pays it
+; again.  With this on, a decode whose count of satisfied parity checks has
+; not improved for 10 iterations and sits below 80 % is stopped.  It makes
+; the receiver cheaper, not better: use it with the attempts above on a slow
+; machine.  true or false (default false).  Bench-measured only
+; (docs/RX-EFFORT-FINDINGS.md).  OFDM modes only; the MFSK floor has its own
+; decoder.  MERCURY_RX_EARLY_STOP=1 overrides it.
+rx_early_stop = false
+
 ; Clip the top rung (QAM16C2) on transmit (issue #2).  It is the only OFDM
 ; mode sent unclipped: its peaks are 11.6 dB over its average power, against
 ; about 7 dB for the rung below, so a transmitter set by its peaks (every SSB

@@ -144,6 +144,29 @@ static int qam16c2_clip_setting(void)
     return e[0] == '1';
 }
 
+/* Early termination of LDPC decodes that are going nowhere
+ * (docs/improvements/23): a frame that fails spends 100 iterations finding
+ * that out, and every optional decode attempt pays that again.  With this on
+ * a decode whose count of satisfied parity checks has stalled below 80 % is
+ * abandoned.  OFF unless asked for: audio:rx_early_stop in the ini
+ * (modem_freedv_set_early_stop(), before the instances are opened) or
+ * MERCURY_RX_EARLY_STOP=1, which wins when set (any other value switches it
+ * off). */
+static int g_early_stop = 0;
+
+void modem_freedv_set_early_stop(int on)
+{
+    g_early_stop = on ? 1 : 0;
+}
+
+static int early_stop_setting(void)
+{
+    const char *e = getenv("MERCURY_RX_EARLY_STOP");
+    if (!e || !*e)
+        return g_early_stop;
+    return e[0] == '1';
+}
+
 static void *fdv_open(int mode)
 {
     /* FSK_LDPC needs an advanced open (was open_freedv_mode_locked in modem.c).
@@ -161,6 +184,7 @@ static void *fdv_open(int mode)
         freedv_set_cp_recycle(f, cp_recycle_setting());
         freedv_set_profile_track(f, profile_track_setting());
         freedv_set_noise_weight(f, noise_weight_setting());
+        freedv_set_ldpc_early_stop(f, early_stop_setting());
         if (mode == FREEDV_MODE_QAM16C2 && qam16c2_clip_setting())
             freedv_set_qam16c2_tx_clip(f, 1);
     }

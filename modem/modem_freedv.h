@@ -29,6 +29,11 @@ void modem_freedv_set_cp_recycle(int guard_samples);
  * (default), 1 = on.  Overridden by MERCURY_QAM16C2_CLIP when that is set. */
 void modem_freedv_set_qam16c2_clip(int on);
 
+/* Early termination of hopeless LDPC decodes for instances opened from now
+ * on: 0 = off (default), 1 = on.  Overridden by MERCURY_RX_EARLY_STOP when
+ * that is set. */
+void modem_freedv_set_early_stop(int on);
+
 /* Noise-aware soft bits for instances opened from now on: 0 = off (default),
  * 1 = on.  Overridden by MERCURY_NOISE_WEIGHT when that is set. */
 void modem_freedv_set_noise_weight(int on);

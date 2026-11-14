@@ -72,6 +72,7 @@ void cfg_set_defaults(mercury_config *cfg)
     cfg->rx_noise_weight       = false;
     cfg->rx_blanker            = 0.0f;
     cfg->rx_notch              = false;
+    cfg->rx_early_stop         = false;
     cfg->qam16c2_tx_clip       = false;
     cfg->tx_delay_ms           = 10;
     cfg->retry_stagger_ms            = ARQ_RETRY_STAGGER_MS_DEFAULT;
@@ -485,6 +486,8 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
     if (d == 0.0 || (d >= 1.0 && d <= 100.0)) cfg->rx_blanker = (float)d;
     b = iniparser_getboolean(ini, CFG_KEY_RX_NOTCH, cfg->rx_notch ? 1 : 0);
     cfg->rx_notch = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_RX_EARLY_STOP, cfg->rx_early_stop ? 1 : 0);
+    cfg->rx_early_stop = (bool) b;
     b = iniparser_getboolean(ini, CFG_KEY_QAM16C2_TX_CLIP, cfg->qam16c2_tx_clip ? 1 : 0);
     cfg->qam16c2_tx_clip = (bool) b;
 
@@ -638,6 +641,7 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
     fprintf(f, "rx_noise_weight = %s\n", cfg->rx_noise_weight ? "true" : "false");
     fprintf(f, "rx_blanker = %g\n", (double)cfg->rx_blanker);
     fprintf(f, "rx_notch = %s\n", cfg->rx_notch ? "true" : "false");
+    fprintf(f, "rx_early_stop = %s\n", cfg->rx_early_stop ? "true" : "false");
     fprintf(f, "qam16c2_tx_clip = %s\n", cfg->qam16c2_tx_clip ? "true" : "false");
 
     fprintf(f, "\n[tnc]\n");

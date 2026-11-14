@@ -7,8 +7,11 @@
  *
  *   rx_bench MODE trials lo hi step chan [variants] [tone_hz tone_db] [imp_rate imp_db]
  *
- *   chan      awgn (lo/hi are SNR3k in dB) or a watterson preset name (lo/hi
- *             are the noise density No; the achieved SNR3k is printed)
+ *   chan      awgn (lo/hi are SNR3k in dB), a watterson preset name (lo/hi
+ *             are the noise density No; the achieved SNR3k is printed), or
+ *             noise: no burst, only the noise a burst at that SNR3k would
+ *             have had (the false-accept control: every frame "delivered" is
+ *             one that was never sent)
  *   variants  comma list, default "stock".  Each variant is a set of EXACT
  *             tokens joined with '+' (a substring match once made "it400"
  *             also switch on "t4": handbook pitfall 11); an unknown token is
@@ -52,6 +55,10 @@
  *             burst's total power
  *   imp       imp_rate noise bursts per second, 2 ms each, imp_db above the
  *             burst's rms
+ *
+ * Environment: RX_BENCH_TIME=1 adds the CPU seconds per trial of each
+ * variant; RX_BENCH_WRONG_SEED=1 is the wrong-session control (the receivers
+ * expect a seeded CRC the transmitter does not use: delivered must be 0).
  *
  * Cells are acquired/delivered: acquired = full RX_SYNC, delivered = CRC ok
  * AND the bytes that were sent.  "any" counts trials at least one variant
@@ -156,7 +163,17 @@ int main(int argc, char **argv) {
   int mode = bench_mode_from_name(argv[1]);
   int trials = atoi(argv[2]);
   double lo = atof(argv[3]), hi = atof(argv[4]), step = atof(argv[5]);
-  int chan = chanutil_preset_from_name(argv[6]);
+  /* "noise": no burst at all, only the noise (and the tone and impulses, if
+   * asked for) that a burst at the row's SNR would have had around it.  The
+   * false-accept control: "delivered" then counts ANY frame a variant
+   * returned, and every one of them is a frame that was never sent. */
+  int noise_only = !strcmp(argv[6], "noise");
+  int chan = noise_only ? CHAN_AWGN : chanutil_preset_from_name(argv[6]);
+  /* RX_BENCH_WRONG_SEED=1: the receivers expect a session's seeded CRC and
+   * accept no plain one, and the transmitter sends plain frames: every frame
+   * is "another session's".  The wrong-session control: delivered must be 0
+   * however good the signal, whatever attempts a variant adds. */
+  int wrong_seed = getenv("RX_BENCH_WRONG_SEED") != NULL;
   const char *vlist = argc > 7 ? argv[7] : "stock";
   double tone_hz = argc > 9 ? atof(argv[8]) : 0.0;
   double tone_db = argc > 9 ? atof(argv[9]) : -99.0;
@@ -178,6 +195,7 @@ int main(int argc, char **argv) {
   for (int k = 0; k < nv; k++) {
     rx[k] = freedv_open(mode);
     freedv_set_frames_per_burst(rx[k], 1);
+    if (wrong_seed) freedv_set_crc_seed(rx[k], 0x5a17, 0);
     freedv_set_chanest_alt(rx[k], v[k].chanest);
     freedv_set_cp_recycle(rx[k], v[k].cp);
     freedv_set_profile_track(rx[k], v[k].pt);
@@ -207,7 +225,9 @@ int main(int argc, char **argv) {
   unsigned char *payload = malloc((size_t)nbytes), *out = malloc((size_t)nbytes + 8);
 
   printf("%s %d B, burst %.2f s, chan %s, tone %.0f Hz %+.0f dB, impulses %.1f/s %+.0f dB\n", argv[1], nbytes,
-         nburst / FS, chanutil_preset_name(chan), tone_hz, tone_db, imp_rate, imp_db);
+         nburst / FS, noise_only ? "NOISE ONLY (no burst)" : chanutil_preset_name(chan), tone_hz, tone_db, imp_rate,
+         imp_db);
+  if (wrong_seed) printf("wrong-session control: the receivers expect a seeded CRC, the bursts carry a plain one\n");
   printf("%-8s %-8s", chan == CHAN_AWGN ? "SNR3k" : "No", "meas");
   for (int k = 0; k < nv; k++) printf(" %12s", v[k].name);
   printf("   (acquired/delivered per %d)\n", trials);
@@ -244,7 +264,7 @@ int main(int argc, char **argv) {
       for (int i = 0; i < ntot; i++) {
         double s = 0.0;
         int bi = i - lead;
-        if (bi >= 0 && bi < n) s = burst[bi];
+        if (bi >= 0 && bi < n && !noise_only) s = burst[bi];
         /* the fading channel already added its noise inside the burst */
         if (!ch || bi < 0 || bi >= n) s += sigma * gauss();
         else (void)gauss();
@@ -295,7 +315,10 @@ int main(int argc, char **argv) {
         clock_t c0 = clock();
         bench_run_burst(rx[k], src, ntot, 0, 0.0, out, zero_noise, NULL, &ss, &got, NULL, NULL);
         cpu[k] += (double)(clock() - c0) / CLOCKS_PER_SEC;
-        if (got && memcmp(out, payload, (size_t)nbytes - 2)) got = 0;
+        /* a frame that is not the one sent does not count as delivered,
+         * except in the two controls, where any frame at all is the fault
+         * being counted */
+        if (got && !noise_only && !wrong_seed && memcmp(out, payload, (size_t)nbytes - 2)) got = 0;
         acq[k] += ss; del[k] += got; any |= got;
       }
       uni += any;

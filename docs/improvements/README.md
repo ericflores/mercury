@@ -149,6 +149,35 @@ Changes inside `modem/freedv/` should stay small and guarded by a field that
 defaults to the stock behaviour, with a `freedv_set_*` / `freedv_get_*` pair
 in `freedv_api.{c,h}`.
 
+## Switches implemented so far
+
+All off by default. The environment variable overrides the ini key, which
+is in `[audio]`. "Token" is the name in `utils/rx_bench` and
+`utils/rx_replay` variants.
+
+| proposal | environment | ini key | what it does | token |
+|---|---|---|---|---|
+| 09 | `MERCURY_CHANEST=auto` | `rx_chanest = auto` | decode attempt from a channel estimate over four pilot rows (decode path 2) | `t4`, `t4f3`, `t4f5` (`auto` in `rx_replay`) |
+| 19 | `MERCURY_CP_RECYCLE=4` | `rx_cp_recycle = 4` | attempt from rows with the cyclic prefix averaged in (path 3) | `cpN` |
+| 26 | `MERCURY_PROFILE_TRACK=1` | `rx_profile_track = true` | the burst demodulated again with the FFT window following the delay profile (path 4) | `pt` |
+| 07 | `MERCURY_NOISE_WEIGHT=1` | `rx_noise_weight = true` | attempt with interfered carriers' soft bits scaled down (path 5) | `nw` |
+| 20 | `MERCURY_DD=1` | `rx_decision_directed = true` | attempt from a channel estimate that also uses the decoder's belief about the data (path 6) | `dd` |
+| 07 | `MERCURY_NOTCH=1` | `rx_notch = true` | automatic notch for steady carriers on the captured audio, every decoder | `nt` |
+| 08 | `MERCURY_BLANKER=6` | `rx_blanker = 6` | impulse blanker on the captured audio, every decoder | `bK` |
+| 23 | `MERCURY_RX_EARLY_STOP=1` | `rx_early_stop = true` | abandon LDPC decodes that are going nowhere (cheaper, not better) | `es` |
+| 02 | `MERCURY_QAM16C2_CLIP=1` | `qam16c2_tx_clip = true` | clip QAM16C2 on transmit: same peak, 4.9 dB more average power | (see `utils/qam16_papr_sweep`) |
+
+The order of the decode attempts on a packet whose stock decode failed:
+HARQ combine (where enabled), noise-weighted (only when the profile singles
+out a carrier), alternative estimate, recycled prefix, profile replay,
+decision-directed. Each stops the list when its CRC passes. Every attempt
+after the stock one is behind the same parity gate.
+
+To see them act in a session, the timing log (`-L file`) has one line per
+frame an optional attempt delivered (`rx decode path N`), a line when a
+notch engages or is released (`carrier notch: 1650.0 Hz`), and one every
+10 s in which the blanker removed anything.
+
 ## Measurement method
 
 - **SNR3k** is signal power over noise power in 3 kHz. On AWGN it is set
@@ -184,6 +213,19 @@ in `freedv_api.{c,h}`.
   and `tests/integration` (`MERCURY_CH_ENGINE=watterson MERCURY_CH_FADING=...
   MERCURY_CH_NO=... go test -C tests/integration -run 'TestMercuryARQTransfer$'`;
   two builds with `MERCURY_TEST_BIN_A` / `MERCURY_TEST_BIN_B`).
+- **Sessions, and what the stations heard.** A session A/B is the same test
+  run twice, switches off and on, over several seeds, on the lockstep
+  transport (`MERCURY_TEST_TRANSPORT=sock`, paced, never
+  `MERCURY_TEST_SOCK_FAST`): compare the time to deliver, and count the
+  `rx decode path` lines to see that the switches acted. Two sessions are
+  not paired (pitfall 19), so the exact comparison is made on recordings:
+  `MERCURY_TEST_RX_DUMP=1` with `MERCURY_TEST_LOGDIR` records what each
+  station's decoders were handed, and `utils/rx_replay FILE variants modes
+  seed` decodes that same audio with every variant and reports frames
+  delivered, gained and lost against the first. "lost" must be 0 for
+  anything that only adds attempts. Interference goes on a session's channel
+  with `MERCURY_CH_TONE=Hz,dBFS` and `MERCURY_CH_IMPULSES=N,dBFS[,ms]`.
+  `docs/INTEGRATION-AB-FINDINGS.md` is the worked example.
 
 ## Test equipment on hand
 
@@ -333,6 +375,38 @@ These cost time during the prototype; do not repeat them.
     A forced window 4 samples from stock's lost 70 frames in 200 at DATAC1's
     cliff for a different reason again: it followed every wobble of the
     timing estimate, which stock's wide hysteresis ignores.
+15. **A measurement made on the pilots is blind at some frequencies.** The
+    pilot residual of proposal 07 (this pilot against the mean of its
+    neighbours in time) cancels anything whose phase advances by whole turns
+    from one pilot row to the next: a carrier at any multiple of 1/frame
+    period (9.09 Hz for the 6 ms-prefix modes). A tone at 2300 Hz, 3 dB under
+    a DATAC1 signal, left the profile flat: 0 of 60. The data symbols see it.
+    When an estimator uses one kind of reference, ask what it cannot see.
+16. **A carrier does its damage before the soft bits.** On a carrier's
+    centre it captures the frequency tracker, which sums the pilots of all
+    carriers (the estimate walks off by 2 Hz and every carrier rotates); a
+    few dB above the signal it stops acquisition. Weighting soft bits cannot
+    repair either. The notch (`modem/rx_notch.c`) removes it first.
+17. **A rule from a specification is a starting point, not a result.** The
+    early-termination rule of proposal 23 as specified (stop under 97 % of
+    the parity checks) lost 3 DATAC1 frames in 37 at the cliff: a decode that
+    ends up converging can sit between 80 and 97 % for more than ten
+    iterations. Run the no-loss check before believing a threshold.
+18. **`MERCURY_TEST_SOCK_FAST=1` starves the decoders.** The lockstep
+    simulator then feeds audio faster than the DSP threads decode it; the
+    rings overflow ("decoder ring full") and the session crawls. Use the
+    paced default for anything that involves decode time.
+19. **Two sessions are not paired, even on one seed.** The harness writes the
+    payload about a second after CONNECTED, and the caller's first turn comes
+    at the same moment: whether the first keydown carries data or an empty
+    poll (9 s more) has been decided by one millisecond. The connect also
+    lands on a 20 ms block boundary that varies from run to run, so a
+    marginal CALL decodes in one run and not in the next. Compare sessions in
+    numbers (several seeds), and use `utils/rx_replay` on the recordings for
+    the exact, frame-by-frame comparison.
+20. **A harness run can fail before it starts**: the two free ports it picks
+    are released before the stations bind them, and now and then one is
+    taken ("Could not open TCP port"). Retry; it is not the modem.
 
 ## Glossary
 

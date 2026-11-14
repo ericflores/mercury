@@ -235,6 +235,10 @@ struct freedv {
   COMP *rx_syms_pt;
   float *rx_amps_pt;
   int rx_decode_path;
+  /* Noise-weighted attempt (docs/improvements/07): the number of carriers the
+   * last failed packet's noise profile singled out (0 = flat, attempt not
+   * run).  rx_decode_path 5 = delivered by it. */
+  int rx_noise_flagged;
   float *harq_llr;
   int harq_llr_nbits;
   int harq_enable;

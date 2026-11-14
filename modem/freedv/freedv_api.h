@@ -302,6 +302,15 @@ int freedv_get_cp_recycle(struct freedv *freedv);
  * carriers stay off.  docs/improvements/26-window-placement.md. */
 void freedv_set_profile_track(struct freedv *freedv, int on);
 int freedv_get_profile_track(struct freedv *freedv);
+/* Noise-aware soft bits for the OFDM data modes: a per-carrier noise profile
+ * is kept from the pilots of each burst; when a packet fails and the profile
+ * singles out carriers (a CW carrier, an FSK signal on part of the band), it
+ * is decoded once more with those carriers' soft bits scaled down (decode
+ * path 5).  0 = off (the default).  docs/improvements/07-noise-aware-llr.md.
+ * freedv_get_noise_profile() is for tests and telemetry. */
+void freedv_set_noise_weight(struct freedv *freedv, int on);
+int freedv_get_noise_weight(struct freedv *freedv);
+int freedv_get_noise_profile(struct freedv *freedv, float *per_carrier, int max);
 int freedv_get_rx_decode_path(struct freedv *freedv);
 void freedv_set_timing_mx_thresh(struct freedv *freedv, float val);
 void freedv_set_bad_uw_errors(struct freedv *freedv, int val);

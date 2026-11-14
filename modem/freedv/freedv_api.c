@@ -1771,6 +1771,31 @@ int freedv_get_profile_track(struct freedv *f) {
   return (f != NULL && f->ofdm != NULL) ? ofdm_get_profile_track(f->ofdm) : 0;
 }
 
+/* Noise-aware soft bits (docs/improvements/07-noise-aware-llr.md): keep a
+ * per-carrier noise profile from the pilots and, when a packet fails and the
+ * profile singles out carriers, decode it once more with those carriers
+ * scaled down (decode path 5). */
+void freedv_set_noise_weight(struct freedv *f, int on) {
+  if (f != NULL && f->ofdm != NULL) ofdm_set_noise_weight(f->ofdm, on);
+}
+
+int freedv_get_noise_weight(struct freedv *f) {
+  return (f != NULL && f->ofdm != NULL) ? ofdm_get_noise_weight(f->ofdm) : 0;
+}
+
+/* The profile of the burst in progress or just received: per carrier, the
+ * mean squared pilot residual (noise plus interference, in the units of the
+ * received symbols).  Writes at most max values; returns the number of
+ * carriers, or 0 when the feature is off or no frame has been added yet. */
+int freedv_get_noise_profile(struct freedv *f, float *per_carrier, int max) {
+  if (f == NULL || f->ofdm == NULL || !f->ofdm->noise_weight || f->ofdm->nv_n < 1)
+    return 0;
+  int nc = f->ofdm->nc;
+  for (int c = 0; c < nc && c < max; c++)
+    per_carrier[c] = f->ofdm->nv_carrier[c + 1] / f->ofdm->nv_n;
+  return nc;
+}
+
 int freedv_get_rx_decode_path(struct freedv *f) {
   return f != NULL ? f->rx_decode_path : 0;
 }

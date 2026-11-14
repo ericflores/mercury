@@ -401,6 +401,13 @@ struct OFDM *ofdm_create(const struct OFDM_CONFIG *config) {
   ofdm->chanest_alt = OFDM_CHANEST_OFF;
   ofdm->chanest_slope = 0.0f;
 
+  ofdm->noise_weight = 0;
+  ofdm->nv_n = 0;
+  ofdm->nv_carrier = CALLOC(ofdm->nc + 2, sizeof(float));
+  assert(ofdm->nv_carrier != NULL);
+  ofdm->nv_frame = CALLOC(ofdm->np > 0 ? ofdm->np : 1, sizeof(float));
+  assert(ofdm->nv_frame != NULL);
+
   ofdm->cp_recycle = 0;
   ofdm->chanest_slope_cp = 0.0f;
   ofdm->rx_sym_cp = MALLOC(sizeof(complex float *) * (ofdm->ns + 3));
@@ -703,6 +710,8 @@ void ofdm_destroy(struct OFDM *ofdm) {
   FREE(ofdm->rx_sym_cp);
   FREE(ofdm->rx_np_cp);
   FREE(ofdm->rx_amp_cp);
+  FREE(ofdm->nv_carrier);
+  FREE(ofdm->nv_frame);
   FREE(ofdm->aphase_est_pilot_log);
   FREE(ofdm->tx_uw_syms);
   FREE(ofdm->uw_ind);
@@ -1850,6 +1859,47 @@ void ofdm_set_cp_recycle(struct OFDM *ofdm, int guard_samples) {
 
 int ofdm_get_cp_recycle(struct OFDM *ofdm) { return ofdm->cp_recycle; }
 
+void ofdm_set_noise_weight(struct OFDM *ofdm, int on) {
+  ofdm->noise_weight = on ? 1 : 0;
+}
+
+int ofdm_get_noise_weight(struct OFDM *ofdm) { return ofdm->noise_weight; }
+
+/* The noise profile (docs/improvements/07-noise-aware-llr.md).  For carrier
+ * i, with h the received pilot times the conjugate of the transmitted one:
+ *
+ *     d = h_this - (h_prev + h_next) / 2
+ *
+ * A channel that changes slowly from pilot row to pilot row cancels in d;
+ * what is left is noise and whatever else sits on the carrier (a CW carrier,
+ * an FSK signal, another station).  With independent noise of variance v on
+ * each pilot, |d|^2 has mean 1.5 v, hence the division.
+ *
+ * The burst's first modem frame has the preamble where its previous pilot
+ * would be, so it is left out and the accumulators restart there. */
+static void ofdm_noise_profile(struct OFDM *ofdm) {
+  int nc = ofdm->nc;
+  if (ofdm_frame_is_first(ofdm)) {
+    for (int i = 0; i < nc + 2; i++) ofdm->nv_carrier[i] = 0.0f;
+    for (int i = 0; i < ofdm->np; i++) ofdm->nv_frame[i] = 0.0f;
+    ofdm->nv_n = 0;
+    return;
+  }
+  float sum = 0.0f;
+  for (int i = 1; i <= nc; i++) {
+    complex float pc = conjf(ofdm->pilots[i]);
+    complex float d = (ofdm->rx_sym[1][i] -
+                       0.5f * (ofdm->rx_sym[0][i] + ofdm->rx_sym[ofdm->ns + 1][i])) * pc;
+    float e = cnormf(d) / 1.5f;
+    ofdm->nv_carrier[i] += e;
+    sum += e;
+  }
+  /* This frame's index in the packet: the first frame is 0 and was skipped,
+   * and nv_n frames have been added since. */
+  if (ofdm->nv_n + 1 < ofdm->np) ofdm->nv_frame[ofdm->nv_n + 1] += sum;
+  ofdm->nv_n++;
+}
+
 /* Cyclic-prefix recycling (docs/improvements/19-cp-recycling.md).  The
  * prefix is a copy of the symbol's last ncp samples, so transmitted sample t
  * equals sample t + m for every t inside it.  The FFT window starts `delta`
@@ -2369,6 +2419,10 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
     aphase_est_pilot[i] = cargf(aphase_est_pilot_rect);
     aamp_est_pilot[i] = cabsf(aphase_est_pilot_rect);
   }
+
+  /* Not in a replay: it runs on a copy of this struct, which shares the
+   * accumulators, and the profile is of the live pass. */
+  if (ofdm->noise_weight && !ofdm->pt_replay) ofdm_noise_profile(ofdm);
 
   float aphase_alt[ofdm->nc + 2];
   float aamp_alt[ofdm->nc + 2];

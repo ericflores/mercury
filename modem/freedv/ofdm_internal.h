@@ -229,6 +229,19 @@ struct OFDM {
   float *rx_amp_cp;
   complex float chanest_slope_cp;
 
+  /* Noise profile from the pilots (Mercury, docs/improvements/07): when
+   * noise_weight is on, every modem frame of a burst but the first adds, per
+   * carrier, the squared residual of this frame's pilot against the mean of
+   * its two neighbours in time (which cancels a slowly changing channel and
+   * leaves noise and interference), to nv_carrier[1..nc] and, summed over
+   * carriers, to nv_frame[modem frame].  nv_n counts the frames added.  The
+   * packet receiver turns the profile into per-carrier weights for one more
+   * decode attempt.  Nothing the other paths use is written from it. */
+  int noise_weight;
+  float *nv_carrier; /* nc + 2 */
+  float *nv_frame;   /* np */
+  int nv_n;
+
   /* Window placement from the pilots' delay profile (Mercury,
    * docs/improvements/26): 0 = off.  When on, the samples shifted into rxbuf
    * are counted and the state the demodulator starts a burst from is saved,

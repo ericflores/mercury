@@ -551,6 +551,46 @@ static int decode_packet_from_syms(struct freedv *f, complex float *syms,
   return freedv_crc16_class(f, codeword, ldpc->data_bits_per_frame);
 }
 
+/* Noise weights (docs/improvements/07-noise-aware-llr.md).  A carrier whose
+ * pilot residual says it carries more than NW_K times the noise of the
+ * median carrier gets its symbols and their amplitudes scaled by
+ * sqrt(median / its noise): inside the demapper the metric of a symbol is
+ * EsNo |r - amp S|^2 / mean_amp^2, so scaling r and amp by s multiplies that
+ * symbol's soft bits by s^2, which is the ratio of the noise variances.
+ * Every other carrier keeps a factor of exactly 1.
+ *
+ * Returns the number of carriers weighted down; 0 means the profile is flat
+ * and a weighted decode would be the unweighted one.
+ *
+ * NW_K 2.0 and NW_MIN_FRAMES 8 are the prototype's and the specification's
+ * starting values; the sweep is in docs/NOISE-WEIGHT-FINDINGS.md. */
+#define NW_K 2.0f
+#define NW_MIN_FRAMES 8
+static int noise_weight_scales(const struct OFDM *ofdm, float *scale) {
+  int nc = ofdm->nc, flagged = 0;
+  float v[nc], srt[nc];
+  if (ofdm->nv_n < NW_MIN_FRAMES) return 0;
+  for (int c = 0; c < nc; c++) v[c] = srt[c] = ofdm->nv_carrier[c + 1] / ofdm->nv_n;
+  for (int a = 1; a < nc; a++)
+    for (int b = a; b > 0 && srt[b] < srt[b - 1]; b--) {
+      float t = srt[b];
+      srt[b] = srt[b - 1];
+      srt[b - 1] = t;
+    }
+  /* the lower median: with an even count, two interfered carriers of four
+   * must not become the reference */
+  float med = srt[(nc - 1) / 2] + 1e-12f;
+  for (int c = 0; c < nc; c++) {
+    if (v[c] > NW_K * med) {
+      scale[c] = sqrtf(med / v[c]);
+      flagged++;
+    } else {
+      scale[c] = 1.0f;
+    }
+  }
+  return flagged;
+}
+
 /*
   OFDM demod function that can support complex (float) or real (short)
   samples.  The real short samples are useful for low memory platforms such as
@@ -697,6 +737,7 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
         int crc_ok = crc_class != 0;
         int combined_ok = 0;
         f->rx_decode_path = 0;
+        f->rx_noise_flagged = 0;
         /* HARQ Chase combining FALLBACK: only when the single-shot decode
          * failed, add the retained running sum of prior (same-frame) LLRs and
          * retry.  Independent noise realisations of the same codeword add
@@ -748,6 +789,53 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
           }
         }
         if (combined_ok) f->rx_decode_path = 1;
+        /* Noise-weighted attempt (docs/improvements/07): when the pilots'
+         * residuals single out carriers with more noise than the rest (a CW
+         * carrier, an FSK signal, another station on part of the band), the
+         * packet is decoded once more with those carriers' soft bits scaled
+         * down, from the best symbols at hand: the recycled rows if that
+         * feature is on, else the alternative estimate's, else the stock
+         * ones.  Only on failure and only when a carrier is singled out, so
+         * a frame that decodes today is never touched and a flat profile
+         * costs nothing.  It runs before the unweighted attempts below
+         * because a profile that is not flat says which attempt is likely to
+         * work; they still run if it fails, so the set of frames delivered
+         * is the union either way.  Same parity gate. */
+        if (!crc_ok && ofdm->noise_weight) {
+          float nw_scale[ofdm->nc];
+          f->rx_noise_flagged = noise_weight_scales(ofdm, nw_scale);
+          if (f->rx_noise_flagged) {
+            const complex float *src = rx_syms;
+            const float *src_amps = rx_amps;
+            if (ofdm->cp_recycle && f->rx_syms_cp != NULL) {
+              src = (const complex float *)f->rx_syms_cp;
+              src_amps = f->rx_amps_cp;
+            } else if (ofdm->chanest_alt && f->rx_syms_alt != NULL) {
+              src = (const complex float *)f->rx_syms_alt;
+              src_amps = f->rx_amps_alt;
+            }
+            complex float nw_syms[Nsymsperpacket];
+            float nw_amps[Nsymsperpacket];
+            for (int s = 0; s < Nsymsperpacket; s++) {
+              float w = nw_scale[s % ofdm->nc];
+              nw_syms[s] = src[s] * w;
+              nw_amps[s] = src_amps[s] * w;
+            }
+            uint8_t nw_codeword[codeword_len];
+            int nw_pcc = 0, nw_iter = 0;
+            int nw_class = decode_packet_from_syms(
+                f, nw_syms, nw_amps, EsNo, ofdm->mean_amp, nw_codeword,
+                &nw_pcc, &nw_iter);
+            if (nw_class != 0) {
+              memcpy(f->rx_payload_bits, nw_codeword, Ndatabitsperpacket);
+              crc_class = nw_class;
+              crc_ok = 1;
+              parityCheckCount = nw_pcc;
+              iter = nw_iter;
+              f->rx_decode_path = 5;
+            }
+          }
+        }
         /* Alternative channel estimate FALLBACK (docs/improvements/09): the
          * stock estimate is the mean of two pilots per carrier, and its own
          * noise costs a dB or more at the SNRs the rungs work at.  A packet

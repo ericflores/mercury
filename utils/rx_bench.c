@@ -5,7 +5,7 @@
  * else.  (acquire_vs_decode measures one receiver; comparing two of its runs
  * compares two noise realisations as well.)
  *
- *   rx_bench MODE trials lo hi step chan [variants] [tone_hz tone_db] [imp_rate imp_db]
+ *   rx_bench MODE trials lo hi step chan [variants] [tone_hz tone_db] [imp_rate imp_db] [fsk_hz fsk_db]
  *
  *   chan      awgn (lo/hi are SNR3k in dB), a watterson preset name (lo/hi
  *             are the noise density No; the achieved SNR3k is printed), or
@@ -55,8 +55,25 @@
  *             burst's total power
  *   imp       imp_rate noise bursts per second, 2 ms each, imp_db above the
  *             burst's rms
+ *   fsk       a MODULATED narrowband interferer (proposal 16, phase 0): 2-FSK
+ *             centred on fsk_hz, fsk_db relative to the burst's total power
+ *             (as the tone), continuous phase, random data.  45.45 baud and
+ *             170 Hz shift (RTTY) unless RX_BENCH_FSK_BAUD / RX_BENCH_FSK_SHIFT
+ *             say otherwise.  The notch cannot remove it: it is what a
+ *             sub-band move would have to dodge.  Its data and phase come
+ *             from a generator of their own, so trials that do not ask for it
+ *             are the same samples as before.  Pass "0 -99" for the tone and
+ *             "0 0" for the impulses to leave them out and still reach this
+ *             one.  Like the tone it is already on the air before the burst:
+ *             the notch's pre-roll sees the same signal continued backwards.
  *
- * Environment: RX_BENCH_TIME=1 adds the CPU seconds per trial of each
+ * Environment: RX_BENCH_CENTRE=Hz opens the mode, transmitter and every
+ * receiver, with its centre at that audio frequency instead of 1500 Hz (the
+ * DATA_CUSTOM open of freedv_open_advanced with the mode's own configuration
+ * and the two centres changed; bench only, nothing in modem/freedv changes).
+ * The carriers sit on the symbol-rate grid, so the centre lands on the
+ * nearest one.  Tone, FSK and impulses stay where they are asked to be.
+ * RX_BENCH_TIME=1 adds the CPU seconds per trial of each
  * variant; RX_BENCH_WRONG_SEED=1 is the wrong-session control (the receivers
  * expect a seeded CRC the transmitter does not use: delivered must be 0).
  *
@@ -67,6 +84,7 @@
  * Copyright (C) 2026 Rhizomatica
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,6 +95,7 @@
 #include "chanutil.h"
 #include "freedv_api.h"
 #include "codec2_ofdm.h"
+#include "ofdm_internal.h"
 #include "rx_blanker.h"
 #include "rx_notch.h"
 
@@ -155,9 +174,26 @@ static int parse_variant(const char *s, variant_t *v) {
   return 0;
 }
 
+/* Open `mode`, at `centre` Hz when that is not 0 (RX_BENCH_CENTRE).  The
+ * custom open takes the mode's own configuration from ofdm_init_mode and
+ * changes only the two centres; the mode name stays, so the filters and the
+ * state machine are the mode's.  With centre 0 it is the plain open. */
+static struct freedv *open_mode(int mode, const char *name, double centre) {
+  if (centre <= 0.0) return freedv_open(mode);
+  struct OFDM_CONFIG cfg;
+  char lname[16];
+  size_t i;
+  for (i = 0; name[i] && i < sizeof(lname) - 1; i++) lname[i] = (char)tolower((unsigned char)name[i]);
+  lname[i] = 0;
+  ofdm_init_mode(lname, &cfg);
+  cfg.tx_centre = cfg.rx_centre = (float)centre;
+  struct freedv_advanced adv = {0, 2, 100, 8000, 1000, 200, "H_256_512_4", &cfg};
+  return freedv_open_advanced(FREEDV_MODE_DATA_CUSTOM, &adv);
+}
+
 int main(int argc, char **argv) {
   if (argc < 7) {
-    fprintf(stderr, "usage: rx_bench MODE trials lo hi step chan [variants] [tone_hz tone_db] [imp_rate imp_db]\n");
+    fprintf(stderr, "usage: rx_bench MODE trials lo hi step chan [variants] [tone_hz tone_db] [imp_rate imp_db] [fsk_hz fsk_db]\n");
     return 1;
   }
   int mode = bench_mode_from_name(argv[1]);
@@ -179,6 +215,11 @@ int main(int argc, char **argv) {
   double tone_db = argc > 9 ? atof(argv[9]) : -99.0;
   double imp_rate = argc > 11 ? atof(argv[10]) : 0.0;
   double imp_db = argc > 11 ? atof(argv[11]) : 0.0;
+  double fsk_hz = argc > 13 ? atof(argv[12]) : 0.0;
+  double fsk_db = argc > 13 ? atof(argv[13]) : -99.0;
+  double fsk_baud = getenv("RX_BENCH_FSK_BAUD") ? atof(getenv("RX_BENCH_FSK_BAUD")) : 45.45;
+  double fsk_shift = getenv("RX_BENCH_FSK_SHIFT") ? atof(getenv("RX_BENCH_FSK_SHIFT")) : 170.0;
+  double centre = getenv("RX_BENCH_CENTRE") ? atof(getenv("RX_BENCH_CENTRE")) : 0.0;
   if (mode < 0 || chan < 0) { fprintf(stderr, "bad mode/channel\n"); return 1; }
 
   variant_t v[16];
@@ -190,10 +231,11 @@ int main(int argc, char **argv) {
     nv++;
   }
 
-  struct freedv *tx = freedv_open(mode);
+  struct freedv *tx = open_mode(mode, argv[1], centre);
+  if (!tx) { fprintf(stderr, "cannot open %s\n", argv[1]); return 1; }
   struct freedv *rx[16];
   for (int k = 0; k < nv; k++) {
-    rx[k] = freedv_open(mode);
+    rx[k] = open_mode(mode, argv[1], centre);
     freedv_set_frames_per_burst(rx[k], 1);
     if (wrong_seed) freedv_set_crc_seed(rx[k], 0x5a17, 0);
     freedv_set_chanest_alt(rx[k], v[k].chanest);
@@ -222,11 +264,16 @@ int main(int argc, char **argv) {
   short *burst = malloc(sizeof(short) * (size_t)(nburst + 4));
   short *buf = malloc(sizeof(short) * (size_t)ntot);
   short *wbuf = malloc(sizeof(short) * (size_t)ntot);
+  const int npre = PREROLL_S * (int)FS;
+  double *fsk = malloc(sizeof(double) * (size_t)(npre + ntot));
   unsigned char *payload = malloc((size_t)nbytes), *out = malloc((size_t)nbytes + 8);
 
-  printf("%s %d B, burst %.2f s, chan %s, tone %.0f Hz %+.0f dB, impulses %.1f/s %+.0f dB\n", argv[1], nbytes,
+  printf("%s %d B, burst %.2f s, chan %s, tone %.0f Hz %+.0f dB, impulses %.1f/s %+.0f dB", argv[1], nbytes,
          nburst / FS, noise_only ? "NOISE ONLY (no burst)" : chanutil_preset_name(chan), tone_hz, tone_db, imp_rate,
          imp_db);
+  if (fsk_db > -90.0) printf(", FSK %.0f Hz %+.0f dB (%.2f baud, %.0f Hz shift)", fsk_hz, fsk_db, fsk_baud, fsk_shift);
+  if (centre > 0.0) printf(", centre %.0f Hz", centre);
+  printf("\n");
   if (wrong_seed) printf("wrong-session control: the receivers expect a seeded CRC, the bursts carry a plain one\n");
   printf("%-8s %-8s", chan == CHAN_AWGN ? "SNR3k" : "No", "meas");
   for (int k = 0; k < nv; k++) printf(" %12s", v[k].name);
@@ -259,8 +306,23 @@ int main(int argc, char **argv) {
       sigma = sqrt(ps / (pow(10.0, snr / 10.0) * (3000.0 / (FS / 2.0))));
       double ta = tone_db > -90.0 ? sqrt(2.0 * ps * pow(10.0, tone_db / 10.0)) : 0.0;
       double tph = 2.0 * M_PI * bench_rng_uniform(&rng);
+      double fa = fsk_db > -90.0 ? sqrt(2.0 * ps * pow(10.0, fsk_db / 10.0)) : 0.0;
       double ia = sqrt(ps) * pow(10.0, imp_db / 20.0);
       int imp_left = 0;
+      /* The interferer, PREROLL_S seconds before the buffer and through it,
+       * from a generator of its own so no other trial's samples move. */
+      if (fa > 0.0) {
+        bench_rng frng = {4242ULL + (uint64_t)t};
+        double ph = 2.0 * M_PI * bench_rng_uniform(&frng), f = fsk_hz;
+        long sym = -1;
+        for (int i = 0; i < npre + ntot; i++) {
+          long ns = (long)floor((double)i * fsk_baud / FS);
+          if (ns != sym) { sym = ns; f = fsk_hz + (bench_rng_uniform(&frng) < 0.5 ? -0.5 : 0.5) * fsk_shift; }
+          fsk[i] = fa * sin(ph);
+          ph += 2.0 * M_PI * f / FS;
+          if (ph > 2.0 * M_PI) ph -= 2.0 * M_PI;
+        }
+      }
       for (int i = 0; i < ntot; i++) {
         double s = 0.0;
         int bi = i - lead;
@@ -269,6 +331,7 @@ int main(int argc, char **argv) {
         if (!ch || bi < 0 || bi >= n) s += sigma * gauss();
         else (void)gauss();
         if (ta > 0.0) s += ta * cos(2.0 * M_PI * tone_hz * i / FS + tph);
+        if (fa > 0.0) s += fsk[npre + i];
         if (imp_rate > 0.0) {
           if (!imp_left && bench_rng_uniform(&rng) < imp_rate / FS) imp_left = (int)(0.002 * FS);
           double g2 = gauss();
@@ -298,6 +361,7 @@ int main(int argc, char **argv) {
             int ti = i - PREROLL_S * (int)FS;
             double s = sigma * bench_rng_gauss(&prng);
             if (ta > 0.0) s += ta * cos(2.0 * M_PI * tone_hz * ti / FS + tph);
+            if (fa > 0.0) s += fsk[i];
             if (s > 32767.0) s = 32767.0;
             if (s < -32768.0) s = -32768.0;
             pre[i] = (short)lrint(s);
@@ -337,6 +401,6 @@ int main(int argc, char **argv) {
   }
   for (int k = 0; k < nv; k++) freedv_close(rx[k]);
   freedv_close(tx);
-  free(burst); free(buf); free(wbuf); free(payload); free(out);
+  free(fsk); free(burst); free(buf); free(wbuf); free(payload); free(out);
   return 0;
 }

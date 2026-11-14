@@ -29,6 +29,8 @@
  *                            before the blanker (proposal 07)
  *               es           early termination of LDPC decodes that are
  *                            going nowhere (proposal 23)
+ *               dd           decision-directed channel estimation as the
+ *                            last attempt (proposal 20)
  *             The first variant is the reference the others are compared to.
  *   modes     comma list of mode names, or "arq" (default): DATAC16, DATAC15,
  *             DATAC4, DATAC3, DATAC1, DATAC17, QAM16C2, the control mode and
@@ -49,7 +51,7 @@
  *
  * Output, per mode and variant: frames delivered (CRC ok), how many by each
  * decode path (0 stock, 2 alternative estimate, 3 recycled prefix, 4 profile
- * replay, 5 noise-weighted), and against the reference: gained (delivered here, not there) and
+ * replay, 5 noise-weighted, 6 decision-directed), and against the reference: gained (delivered here, not there) and
  * lost (delivered there, not here).  Frames are matched by content and by
  * position within one second.  "lost" must be 0 for a variant that only adds
  * attempts after the stock decode.
@@ -83,6 +85,7 @@ typedef struct {
   float blank;
   int notch;
   int es;
+  int dd;
   char name[64];
 } variant_t;
 
@@ -112,6 +115,7 @@ static int parse_variant(const char *s, variant_t *v) {
   v->blank = 0.0f;
   v->notch = 0;
   v->es = 0;
+  v->dd = 0;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -2;
@@ -120,6 +124,7 @@ static int parse_variant(const char *s, variant_t *v) {
     if (!strcmp(t, "nw")) { v->nw = 1; continue; }
     if (!strcmp(t, "nt")) { v->notch = 1; continue; }
     if (!strcmp(t, "es")) { v->es = 1; continue; }
+    if (!strcmp(t, "dd")) { v->dd = 1; continue; }
     if (t[0] == 'b' && t[1] >= '0' && t[1] <= '9') {
       char *end;
       double kb = strtod(t + 1, &end);
@@ -144,7 +149,7 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, auto, t4, t4f3, t4f5, cpN, pt, nw, bK, nt, es\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, auto, t4, t4f3, t4f5, cpN, pt, nw, bK, nt, es, dd\n", t, s);
     return -1;
   }
   return 0;
@@ -206,6 +211,7 @@ static void decode_file(int mode, const variant_t *v, uint16_t seed, const short
   freedv_set_profile_track(f, v->pt); /* refused by modes of fewer than 9 carriers */
   freedv_set_noise_weight(f, v->nw);
   freedv_set_ldpc_early_stop(f, v->es);
+  freedv_set_decision_directed(f, v->dd);
 
   int nbytes = freedv_get_bits_per_modem_frame(f) / 8;
   unsigned char *out = malloc((size_t)nbytes + 8);
@@ -305,18 +311,18 @@ int main(int argc, char **argv) {
     }
   }
 
-  printf("%-8s %-18s %6s %7s  %5s %5s %5s %5s %5s  %6s %5s  %6s\n", "mode", "variant", "frames", "seeded", "p0",
-         "p2", "p3", "p4", "p5", "gained", "lost", "syncs");
+  printf("%-8s %-18s %6s %7s  %5s %5s %5s %5s %5s %5s  %6s %5s  %6s\n", "mode", "variant", "frames", "seeded",
+         "p0", "p2", "p3", "p4", "p5", "p6", "gained", "lost", "syncs");
 
   int tot[MAX_VARIANTS] = {0}, totg[MAX_VARIANTS] = {0}, totl[MAX_VARIANTS] = {0};
   for (int m = 0; m < nm; m++) {
     result_t r[MAX_VARIANTS];
     for (int k = 0; k < nv; k++) decode_file(modes[m], &v[k], seed, sv[k], n, &r[k]);
     for (int k = 0; k < nv; k++) {
-      int p[6] = {0}, seeded = 0;
+      int p[7] = {0}, seeded = 0;
       for (int i = 0; i < r[k].n; i++) {
         int path = r[k].f[i].path;
-        if (path >= 0 && path <= 5) p[path]++;
+        if (path >= 0 && path <= 6) p[path]++;
         seeded += r[k].f[i].seeded;
       }
       int gained = k ? count_missing(&r[k], &r[0]) : 0;
@@ -324,15 +330,15 @@ int main(int argc, char **argv) {
       tot[k] += r[k].n;
       totg[k] += gained;
       totl[k] += lost;
-      printf("%-8s %-18s %6d %7d  %5d %5d %5d %5d %5d  %6d %5d  %6d\n", mname[m], v[k].name, r[k].n, seeded, p[0],
-             p[2], p[3], p[4], p[5], gained, lost, r[k].syncs);
+      printf("%-8s %-18s %6d %7d  %5d %5d %5d %5d %5d %5d  %6d %5d  %6d\n", mname[m], v[k].name, r[k].n, seeded,
+             p[0], p[2], p[3], p[4], p[5], p[6], gained, lost, r[k].syncs);
     }
     for (int k = 0; k < nv; k++) free(r[k].f);
     fflush(stdout);
   }
   for (int k = 0; k < nv; k++)
-    printf("%-8s %-18s %6d %7s  %5s %5s %5s %5s %5s  %6d %5d\n", "all", v[k].name, tot[k], "", "", "", "", "", "",
-           totg[k], totl[k]);
+    printf("%-8s %-18s %6d %7s  %5s %5s %5s %5s %5s %5s  %6d %5d\n", "all", v[k].name, tot[k], "", "", "", "", "",
+           "", "", totg[k], totl[k]);
   for (int k = 0; k < nv; k++)
     if (sv[k] != s) free(sv[k]);
   free(s);

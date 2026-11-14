@@ -34,6 +34,10 @@ void modem_freedv_set_qam16c2_clip(int on);
  * that is set. */
 void modem_freedv_set_early_stop(int on);
 
+/* Decision-directed channel estimation for instances opened from now on:
+ * 0 = off (default), 1 = on.  Overridden by MERCURY_DD when that is set. */
+void modem_freedv_set_decision_directed(int on);
+
 /* Noise-aware soft bits for instances opened from now on: 0 = off (default),
  * 1 = on.  Overridden by MERCURY_NOISE_WEIGHT when that is set. */
 void modem_freedv_set_noise_weight(int on);

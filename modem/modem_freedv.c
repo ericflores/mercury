@@ -167,6 +167,27 @@ static int early_stop_setting(void)
     return e[0] == '1';
 }
 
+/* Decision-directed channel estimation (docs/improvements/20): the last
+ * decode attempt, from a channel estimate that uses the decoder's own belief
+ * about the data symbols as well as the pilots.  Receiver only.  OFF unless
+ * asked for: audio:rx_decision_directed in the ini
+ * (modem_freedv_set_decision_directed(), before the instances are opened) or
+ * MERCURY_DD=1, which wins when set (any other value switches it off). */
+static int g_decision_directed = 0;
+
+void modem_freedv_set_decision_directed(int on)
+{
+    g_decision_directed = on ? 1 : 0;
+}
+
+static int decision_directed_setting(void)
+{
+    const char *e = getenv("MERCURY_DD");
+    if (!e || !*e)
+        return g_decision_directed;
+    return e[0] == '1';
+}
+
 static void *fdv_open(int mode)
 {
     /* FSK_LDPC needs an advanced open (was open_freedv_mode_locked in modem.c).
@@ -185,6 +206,7 @@ static void *fdv_open(int mode)
         freedv_set_profile_track(f, profile_track_setting());
         freedv_set_noise_weight(f, noise_weight_setting());
         freedv_set_ldpc_early_stop(f, early_stop_setting());
+        freedv_set_decision_directed(f, decision_directed_setting());
         if (mode == FREEDV_MODE_QAM16C2 && qam16c2_clip_setting())
             freedv_set_qam16c2_tx_clip(f, 1);
     }
@@ -236,7 +258,8 @@ static int fdv_rawdata_rx(void *ctx, uint8_t *bytes_out, const int16_t *demod_in
     int n = (int)freedv_rawdatarx(FDV(ctx), bytes_out, (short *)demod_in);
     /* A frame delivered by one of the optional decode attempts (2 = the
      * alternative channel estimate, 3 = the recycled cyclic prefix, 4 = the
-     * profile-tracker replay, 5 = the noise-weighted attempt) says so in the timing log: it is the only way
+     * profile-tracker replay, 5 = the noise-weighted attempt, 6 = the
+     * decision-directed attempt) says so in the timing log: it is the only way
      * to see, in a session, that a switch did something.  Paths 0 and 1 (the
      * stock decode and the HARQ combine) stay silent, so with the switches
      * off the log is what it was. */

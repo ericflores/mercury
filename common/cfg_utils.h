@@ -76,6 +76,7 @@
 #define CFG_KEY_RX_BLANKER          "audio:rx_blanker"
 #define CFG_KEY_RX_NOTCH            "audio:rx_notch"
 #define CFG_KEY_RX_EARLY_STOP       "audio:rx_early_stop"
+#define CFG_KEY_RX_DECISION_DIRECTED "audio:rx_decision_directed"
 #define CFG_KEY_QAM16C2_TX_CLIP     "audio:qam16c2_tx_clip"
 #define CFG_KEY_TNC_KEEPALIVE_S     "tnc:keepalive_s"
 #define CFG_KEY_TNC_BUFFER_REPORT_MS "tnc:buffer_report_ms"
@@ -166,6 +167,10 @@ typedef struct {
     bool     rx_notch;              /* Automatic notch for steady carriers on
                                     * the captured audio (issue #7).  false
                                     * (default) off. */
+    bool     rx_decision_directed;  /* Last decode attempt from a channel
+                                    * estimate that also uses the decoder's
+                                    * belief about the data (issue #20).
+                                    * false (default) off. */
     bool     rx_early_stop;         /* Abandon LDPC decodes that are going
                                     * nowhere (issue #23).  false (default)
                                     * runs every decode to its limit. */

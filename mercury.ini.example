@@ -233,6 +233,17 @@ rx_notch = false
 ; decoder.  MERCURY_RX_EARLY_STOP=1 overrides it.
 rx_early_stop = false
 
+; One more decode attempt for OFDM frames that every other attempt failed
+; (issue #20).  The receiver's channel estimate rests on 2 pilot symbols per
+; carrier and frame; here the decoder's own belief about the 4 data symbols
+; between them, weighted by how sure it is of each, is added to the pilots,
+; the channel is estimated again and the frame decoded again, up to twice.
+; Receiver only: it works with any peer.  true or false (default false).
+; Bench-measured only (docs/DECISION-DIRECTED-FINDINGS.md); not yet tried on
+; the air.  Costs up to two more LDPC decodes on a frame that failed.
+; MERCURY_DD=1 overrides it.
+rx_decision_directed = false
+
 ; Clip the top rung (QAM16C2) on transmit (issue #2).  It is the only OFDM
 ; mode sent unclipped: its peaks are 11.6 dB over its average power, against
 ; about 7 dB for the rung below, so a transmitter set by its peaks (every SSB

@@ -38,6 +38,26 @@
  * has its own value: getopt_long() then reports an abbreviation that fits more
  * than one name (--itur-m) as ambiguous instead of running the first match. */
 #define PRESET_OPT_BASE 1000
+#define OPT_TONE     2001
+#define OPT_IMPULSES 2002
+#define MAX_TONES    4
+
+/* A small generator for the impulses, apart from the fading model's so that
+ * asking for impulses does not change the fade a seed gives. */
+static unsigned long long imp_state;
+static double imp_uniform(void)
+{
+    imp_state ^= imp_state >> 12;
+    imp_state ^= imp_state << 25;
+    imp_state ^= imp_state >> 27;
+    return (double)((imp_state * 2685821657736338717ULL) >> 11) / 9007199254740992.0;
+}
+static double imp_gauss(void)
+{
+    double u = imp_uniform(), v = imp_uniform();
+    if (u < 1e-300) u = 1e-300;
+    return sqrt(-2.0 * log(u)) * cos(2.0 * M_PI * v);
+}
 
 static const char *USAGE_HEAD =
     "Command line HF channel simulation tool using the Watterson model.\n"
@@ -68,6 +88,17 @@ static const char *USAGE_HEAD =
     "  --clip int16           Hilbert clipper magnitude (default 32767)\n"
     "  --ssbfilt 0|1          SSB bandwidth filter (default 1 on)\n"
     "  --complexout           Output complex int16 IQ (default real int16)\n"
+    "  --tone Hz,dBFS         Add an unmodulated carrier to the output, after\n"
+    "                         the channel and the SSB filter: what a receiver\n"
+    "                         hears from a broadcast heterodyne or a birdie.\n"
+    "                         dBFS is the carrier's peak against int16 full\n"
+    "                         scale.  Up to 4.  It is there whether or not the\n"
+    "                         input carries a signal.\n"
+    "  --impulses N,dBFS[,ms] Add N noise bursts a second, at random times, each\n"
+    "                         ms long (default 2), of Gaussian noise whose rms\n"
+    "                         is dBFS against int16 full scale: ignition and\n"
+    "                         switching noise.  The times follow the fading\n"
+    "                         seed (MERCURY_WATTERSON_SEED).\n"
     "\n"
     "  The printed SNR3k uses the ch.c convention: the faded analytic-signal\n"
     "  power over the complex noise power in 3 kHz, measured before the SSB\n"
@@ -193,6 +224,12 @@ int main(int argc, char *argv[])
     int                       npspec      = 0;
     int                       list_presets = 0, want_help = 0;
 
+    /* Interference added to the output (--tone, --impulses). */
+    double tone_hz[MAX_TONES], tone_amp[MAX_TONES], tone_ph[MAX_TONES];
+    int    ntones = 0;
+    double imp_rate = 0.0, imp_rms = 0.0, imp_ms = 2.0;
+    int    imp_left = 0;
+
     /* ---- Defaults ---- */
 
     Fs          = 8000;
@@ -220,6 +257,8 @@ int main(int argc, char *argv[])
             {"preset",       required_argument, 0, 'p'},
             {"legacy",       no_argument,       0, 'L'},
             {"list-presets", no_argument,       0, 'l'},
+            {"tone",         required_argument, 0, OPT_TONE},
+            {"impulses",     required_argument, 0, OPT_IMPULSES},
         };
         const int nfixed = (int)(sizeof(fixed_opts) / sizeof(fixed_opts[0]));
         int npre;
@@ -343,6 +382,37 @@ int main(int argc, char *argv[])
                     pspec[npspec++] = ps;
                 }
                 break;
+            case OPT_TONE:
+            {
+                double hz, db;
+                if (ntones == MAX_TONES || sscanf(optarg, "%lf,%lf", &hz, &db) != 2 || hz <= 0.0 || db > 0.0)
+                {
+                    fprintf(stderr, "%s: invalid --tone '%s'. Use: Hz,dBFS (dBFS <= 0), at most %d of them\n",
+                            argv[0], optarg, MAX_TONES);
+                    free(long_opts);
+                    return 1;
+                }
+                tone_hz[ntones] = hz;
+                tone_amp[ntones] = 32767.0 * pow(10.0, db / 20.0);
+                tone_ph[ntones] = 0.0;
+                ntones++;
+                break;
+            }
+            case OPT_IMPULSES:
+            {
+                double rate, db, ms = 2.0;
+                int got = sscanf(optarg, "%lf,%lf,%lf", &rate, &db, &ms);
+                if (got < 2 || rate <= 0.0 || db > 0.0 || ms <= 0.0 || ms > 1000.0)
+                {
+                    fprintf(stderr, "%s: invalid --impulses '%s'. Use: per_second,dBFS[,ms]\n", argv[0], optarg);
+                    free(long_opts);
+                    return 1;
+                }
+                imp_rate = rate;
+                imp_rms = 32767.0 * pow(10.0, db / 20.0);
+                imp_ms = ms;
+                break;
+            }
             case 'h':
                 want_help = 1;
                 break;
@@ -511,6 +581,11 @@ int main(int argc, char *argv[])
     fprintf(stderr,
             "watterson_test: Fs=%d No=%4.2f dB/Hz foff=%4.2f Hz clip=%4.2f ssbfilt=%d complexout=%d\n",
             Fs, No, foff_hz, clip, ssbfilt_en, complex_out);
+    for (i = 0; i < ntones; i++)
+        fprintf(stderr, "  Tone %d: %.2f Hz, peak %.0f\n", i, tone_hz[i], tone_amp[i]);
+    if (imp_rate > 0.0)
+        fprintf(stderr, "  Impulses: %.2f per second, %.2f ms, rms %.0f\n", imp_rate, imp_ms, imp_rms);
+    imp_state = 0x9E3779B97F4A7C15ULL ^ ((unsigned long long)watterson_get_seed(&watterson) << 17);
 
     if (watterson.num_paths > 0)
     {
@@ -641,14 +716,35 @@ int main(int argc, char *argv[])
 
             for (i = 0; i < BUF_N; i++)
             {
-                sam = ssbfiltout[i].real;
+                /* interference the receiver hears, whatever the transmitter does */
+                double add_re = 0.0, add_im = 0.0;
+                for (k = 0; k < ntones; k++)
+                {
+                    add_re += tone_amp[k] * cos(tone_ph[k]);
+                    add_im += tone_amp[k] * sin(tone_ph[k]);
+                    tone_ph[k] += 2.0 * M_PI * tone_hz[k] / Fs;
+                    if (tone_ph[k] > 2.0 * M_PI) tone_ph[k] -= 2.0 * M_PI;
+                }
+                if (imp_rate > 0.0)
+                {
+                    if (!imp_left && imp_uniform() < imp_rate / Fs)
+                        imp_left = (int)(imp_ms * Fs / 1000.0 + 0.5);
+                    if (imp_left)
+                    {
+                        add_re += imp_rms * imp_gauss();
+                        add_im += imp_rms * imp_gauss();
+                        imp_left--;
+                    }
+                }
+
+                sam = ssbfiltout[i].real + (float)add_re;
                 if (sam > 32767.0f)  { noutclipped++; sam = 32767.0f; }
                 if (sam < -32767.0f) { noutclipped++; sam = -32767.0f; }
                 *pout++ = (short)sam;
 
                 if (complex_out)
                 {
-                    sam = ssbfiltout[i].imag;
+                    sam = ssbfiltout[i].imag + (float)add_im;
                     if (sam > 32767.0f)  { noutclipped++; sam = 32767.0f; }
                     if (sam < -32767.0f) { noutclipped++; sam = -32767.0f; }
                     *pout++ = (short)sam;

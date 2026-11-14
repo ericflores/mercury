@@ -2043,6 +2043,11 @@ static void modem_apply_crc_seed(uint16_t seed)
     }
     pthread_mutex_unlock(&modem_pool_lock);
     HLOGD("modem", "session CRC seed %s", seed ? "set" : "cleared");
+    /* The value, in the timing log: a recording of the session
+     * (MERCURY_RX_DUMP) can only be decoded offline (utils/rx_replay) with
+     * the seed its payload frames carry in their CRC. */
+    if (seed)
+        HLOGT("modem", "session CRC seed 0x%04x", seed);
 }
 static int rx_decoder_adopt(rx_decoder_state_t *state, modem_codec_t codec, int mode,
                             int max_samples, size_t bytes_cap);

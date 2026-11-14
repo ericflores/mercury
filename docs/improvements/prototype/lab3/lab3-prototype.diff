@@ -1,0 +1,462 @@
+diff --git a/modem/freedv/ofdm.c b/modem/freedv/ofdm.c
+index df25d52..4b4eb99 100644
+--- a/modem/freedv/ofdm.c
++++ b/modem/freedv/ofdm.c
+@@ -1811,6 +1811,308 @@ int ofdm_get_chanest_alt(struct OFDM *ofdm) { return ofdm->chanest_alt; }
+  *    neighbours without undoing that slope delivered 0/20 DATAC1 frames at
+  *    +5 dB (docs/improvements/prototype), so the common slope is tracked
+  *    over the burst and removed before smoothing. */
++int mx_tpos = -1;  /* lab: FFT window start = timing_est + mx_tpos (hysteresis +-4); -1 stock */
++int mx_interp = 0; /* lab: per-row estimate. 1 linear this/next, 2 Catmull-Rom, 3 t4 with a time slope */
++static int mx_sp;
++int mx_auto = 0;   /* lab: window placed from the measured delay profile */
++int mx_auto_dbg = 0;
++float mx_auto_thr = 0.1f;
++float mx_auto_k = 4.0f;
++static int mx_w_fwd(void);
++#define MX_SP(o) (mx_auto ? mx_w_fwd() : mx_tpos >= 0 ? mx_sp : (o)->sample_point)
++
++/* isi(L): samples of another symbol inside the window when the window starts
++ * L samples after a path's useful part begins (L in [-ncp, 0] is clean) */
++static float mx_isi(int L, int ncp) {
++  int a = L > -2 ? L + 2 : 0;
++  int b = L < -ncp + 2 ? (-ncp + 2 - L) : 0;
++  return (float)(a + b);
++}
++
++static int mx_w;          /* the placed window, same coordinates as sample_point */
++static int mx_hold;
++static int mx_ntrk;
++static float mx_trk[8];   /* tracked path lags, relative to the placed window */
++static float mx_trkw[8];
++static int mx_trka[8];
++
++static int mx_w_fwd(void) { return mx_w; }
++
++/* Paths by matching pursuit on the pilot rows seen through a window that
++ * starts at `win`: the lag that explains most of the rows' energy, removed,
++ * then the next, up to three.  A lag is a path only if it explains more than
++ * mx_auto_k times what a noise lag would (the residual energy over nc) and
++ * at least mx_auto_thr of the strongest.  pk = lag + 64 (0..127). */
++static int mx_detect(struct OFDM *ofdm, float woff_est, int win, int *pk,
++                     float *pw, float *ratio) {
++  int first = (ofdm->sync_state == trial && ofdm->sync_counter == 0);
++  int last = (ofdm->sync_state == synced && ofdm->modem_frame == ofdm->np - 1);
++  int nc = ofdm->nc, m = ofdm->m, n = 0;
++  complex float H[4][nc];
++  for (int pr = 0; pr < 4; pr++) {
++    if (first && pr == 0) continue;
++    if (last && pr == 3) continue;
++    int st = ofdm->rxbufst + ofdm->samplespersymbol +
++             pr * ofdm->samplesperframe + 1 + win;
++    if (st < 0 || st + m > ofdm->nrxbuf) continue;
++    complex float work[m];
++    complex float row[nc + 2];
++    for (int k = 0; k < m; k++)
++      work[k] = ofdm->rxbuf[st + k] * cmplxconj(woff_est * (st + k));
++    dft(ofdm, row, work);
++    for (int i = 1; i <= nc; i++) H[n][i - 1] = row[i] * conjf(ofdm->pilots[i]);
++    n++;
++  }
++  *ratio = 0.0f;
++  if (n == 0) return 0;
++  float e0 = 0.0f;
++  for (int r = 0; r < n; r++)
++    for (int i = 0; i < nc; i++) e0 += cnormf(H[r][i]);
++  float eres = e0;
++  int np = 0;
++  for (int it = 0; it < 3; it++) {
++    float bestv = 0.0f;
++    int bestd = 0;
++    for (int d = -64; d < 64; d++) {
++      float v = 0.0f;
++      for (int r = 0; r < n; r++) {
++        complex float c = 0.0f;
++        for (int i = 0; i < nc; i++)
++          c += H[r][i] * cmplxconj(TAU * (i + 1) * d / (float)m);
++        v += cnormf(c);
++      }
++      if (v > bestv) { bestv = v; bestd = d; }
++    }
++    float expl = bestv / nc;
++    if (expl < mx_auto_k * eres / nc) break;
++    if (np > 0 && expl < mx_auto_thr * pw[0]) break;
++    int dup = 0;
++    for (int j = 0; j < np; j++) {
++      int dd = abs(bestd + 64 - pk[j]);
++      if (dd > 64) dd = 128 - dd;
++      if (dd < 4) dup = 1;
++    }
++    if (dup) break;
++    pk[np] = bestd + 64;
++    pw[np] = expl;
++    np++;
++    for (int r = 0; r < n; r++) {
++      complex float a = 0.0f;
++      for (int i = 0; i < nc; i++)
++        a += H[r][i] * cmplxconj(TAU * (i + 1) * bestd / (float)m);
++      a /= nc;
++      for (int i = 0; i < nc; i++)
++        H[r][i] -= a * cmplx(TAU * (i + 1) * bestd / (float)m);
++    }
++    eres = 0.0f;
++    for (int r = 0; r < n; r++)
++      for (int i = 0; i < nc; i++) eres += cnormf(H[r][i]);
++  }
++  *ratio = e0 / (eres + 1E-20f);
++  return np;
++}
++
++static void mx_place(struct OFDM *ofdm, float woff_est, int d_sp) {
++  (void)d_sp;
++  int first = (ofdm->sync_state == trial && ofdm->sync_counter == 0);
++  int ncp = ofdm->ncp;
++  if (first) {
++    mx_w = ofdm->sample_point;
++    mx_ntrk = 0;
++    mx_hold = 0;
++  }
++  int pk[8];
++  float pw[8], ratio = 0.0f;
++  int np = mx_detect(ofdm, woff_est, mx_w, pk, pw, &ratio);
++  for (int t = 0; t < mx_ntrk; t++) mx_trka[t]++;
++  if (np == 0) {
++    mx_hold++;
++    if (mx_auto_dbg)
++      fprintf(stderr, "mxplace frame %d none ratio %.1f w %d te %d sp %d foff %.2f\n",
++              ofdm->modem_frame, (double)ratio, mx_w, ofdm->timing_est,
++              ofdm->sample_point, (double)ofdm->foff_est_hz);
++    return;
++  }
++  mx_hold = 0;
++  int lag[8];
++  int assigned[8];
++  int nas = 0;
++  float cs = 0.0f, ws = 0.0f;
++  for (int j = 0; j < np; j++) {
++    assigned[j] = 0;
++    int base = pk[j] - 64;
++    float bestdist = 1E9f;
++    int bestl = base;
++    for (int t = 0; t < mx_ntrk; t++) {
++      for (int k = -1; k <= 1; k++) {
++        float dd = fabsf((float)(base + 128 * k) - mx_trk[t]);
++        if (dd < bestdist) { bestdist = dd; bestl = base + 128 * k; }
++      }
++    }
++    if (mx_ntrk > 0 && bestdist <= 10.0f) {
++      lag[j] = bestl;
++      assigned[j] = 1;
++      nas++;
++      cs += pw[j] * lag[j];
++      ws += pw[j];
++    }
++  }
++  if (nas == 0 && mx_ntrk > 0) {
++    /* none of the known paths is visible: place the new ones around them */
++    for (int t = 0; t < mx_ntrk; t++) {
++      float a = mx_trkw[t] * powf(0.85f, (float)mx_trka[t]);
++      cs += a * mx_trk[t];
++      ws += a;
++    }
++  }
++  if (nas == 0 && mx_ntrk == 0) {
++    /* nothing known: the arrangement with the smallest spread, its centroid
++     * nearest the middle of the prefix */
++    int ord[8];
++    for (int j = 0; j < np; j++) ord[j] = j;
++    for (int i = 1; i < np; i++)
++      for (int j = i; j > 0 && pk[ord[j]] < pk[ord[j - 1]]; j--) {
++        int t = ord[j]; ord[j] = ord[j - 1]; ord[j - 1] = t;
++      }
++    int g0 = 0, gbest = -1;
++    for (int j = 0; j < np; j++) {
++      int nx = pk[ord[(j + 1) % np]] + (j + 1 == np ? 128 : 0);
++      int gap = nx - pk[ord[j]];
++      if (np == 1) gap = 128;
++      if (gap > gbest) { gbest = gap; g0 = (j + 1) % np; }
++    }
++    cs = 0.0f; ws = 0.0f;
++    for (int j = 0; j < np; j++) {
++      int q = ord[j];
++      lag[q] = pk[q] + (j < g0 ? 128 : 0) - 64;
++      cs += pw[q] * lag[q];
++      ws += pw[q];
++    }
++    float cen = cs / (ws + 1E-20f), target = -(float)ncp / 2.0f;
++    int sh = 0;
++    float bd = fabsf(cen - target);
++    for (int k = -2; k <= 2; k++)
++      if (fabsf(cen + 128.0f * k - target) < bd) { bd = fabsf(cen + 128.0f * k - target); sh = 128 * k; }
++    for (int j = 0; j < np; j++) lag[j] += sh;
++  } else {
++    float cen = cs / (ws + 1E-20f);
++    for (int j = 0; j < np; j++) {
++      if (assigned[j]) continue;
++      int base = pk[j] - 64, bestl = base;
++      float bd = 1E9f;
++      for (int k = -1; k <= 1; k++)
++        if (fabsf(base + 128.0f * k - cen) < bd) { bd = fabsf(base + 128.0f * k - cen); bestl = base + 128 * k; }
++      lag[j] = bestl;
++    }
++  }
++  /* refresh the tracks: seen paths replace their track or start one */
++  for (int j = 0; j < np; j++) {
++    int hit = -1;
++    for (int t = 0; t < mx_ntrk; t++)
++      if (fabsf(mx_trk[t] - lag[j]) <= 10.0f) hit = t;
++    if (hit < 0 && mx_ntrk < 8) {
++      hit = mx_ntrk++;
++      mx_trkw[hit] = pw[j];
++    }
++    if (hit >= 0) {
++      mx_trk[hit] = (float)lag[j];
++      mx_trkw[hit] = 0.5f * mx_trkw[hit] + 0.5f * pw[j];
++      mx_trka[hit] = 0;
++    }
++  }
++  int nt = 0;
++  for (int t = 0; t < mx_ntrk; t++) {
++    if (mx_trka[t] > 25) continue;
++    mx_trk[nt] = mx_trk[t]; mx_trkw[nt] = mx_trkw[t]; mx_trka[nt] = mx_trka[t];
++    nt++;
++  }
++  mx_ntrk = nt;
++  /* the shift that leaves the least of another symbol inside the window;
++   * a path not seen now still counts, fading with its age */
++  float wsum = 0.0f;
++  for (int t = 0; t < mx_ntrk; t++) wsum += mx_trkw[t] * powf(0.85f, (float)mx_trka[t]);
++  float c0 = 0.0f;
++  for (int t = 0; t < mx_ntrk; t++)
++    c0 += mx_trkw[t] * powf(0.85f, (float)mx_trka[t]) * mx_isi((int)lrintf(mx_trk[t]), ncp);
++  c0 /= (wsum + 1E-20f);
++  float bestc = c0;
++  int bestd = 0;
++  for (int dl = -64; dl <= 64; dl++) {
++    float c = 0.0f;
++    for (int t = 0; t < mx_ntrk; t++)
++      c += mx_trkw[t] * powf(0.85f, (float)mx_trka[t]) * mx_isi((int)lrintf(mx_trk[t]) + dl, ncp);
++    c /= (wsum + 1E-20f);
++    if (c < bestc - 1E-4f) { bestc = c; bestd = dl; }
++  }
++  if (mx_auto_dbg) {
++    fprintf(stderr, "mxplace frame %d np %d trk", ofdm->modem_frame, np);
++    for (int t = 0; t < mx_ntrk; t++)
++      fprintf(stderr, " %d(%.2f,a%d)", (int)lrintf(mx_trk[t]), (double)(mx_trkw[t] / (wsum + 1E-20f)), mx_trka[t]);
++    fprintf(stderr, " delta %d cost %.2f -> %.2f ratio %.1f w %d te %d sp %d foff %.2f\n",
++            bestd, (double)c0, (double)bestc, (double)ratio, mx_w + bestd,
++            ofdm->timing_est, ofdm->sample_point, (double)ofdm->foff_est_hz);
++  }
++  if (bestd != 0) {
++    mx_w += bestd;
++    for (int t = 0; t < mx_ntrk; t++) mx_trk[t] += bestd;
++  }
++}
++
++static void ofdm_chanest_row(struct OFDM *ofdm, float t, float *aphase,
++                             float *aamp) {
++  int nc = ofdm->nc;
++  complex float g[nc + 2];
++  int first = (ofdm->sync_state == trial && ofdm->sync_counter == 0);
++  int last = (ofdm->sync_state == synced && ofdm->modem_frame == ofdm->np - 1);
++  float wp, wt, wn, wf;
++  if (mx_interp == 1) {
++    wp = 0.0f; wt = 1.0f - t; wn = t; wf = 0.0f;
++  } else if (mx_interp == 2) {
++    float t2 = t * t, t3 = t2 * t;
++    wp = 0.5f * (2 * t2 - t3 - t);
++    wt = 0.5f * (3 * t3 - 5 * t2 + 2);
++    wn = 0.5f * (4 * t2 - 3 * t3 + t);
++    wf = 0.5f * (t3 - t2);
++    if (first) { wt += wp; wp = 0.0f; }
++    if (last) { wn += wf; wf = 0.0f; }
++  } else {
++    wp = 1.0f - t; wt = 2.0f - t; wn = 1.0f + t; wf = t;
++    if (first) wp = 0.0f;
++    if (last) wf = 0.0f;
++  }
++  float ws = wp + wt + wn + wf;
++  for (int i = 1; i <= nc; i++) {
++    complex float pc = conjf(ofdm->pilots[i]);
++    g[i] = (wp * ofdm->rx_sym[0][i] + wt * ofdm->rx_sym[1][i] +
++            wn * ofdm->rx_sym[ofdm->ns + 1][i] +
++            wf * ofdm->rx_sym[ofdm->ns + 2][i]) *
++           pc / ws;
++  }
++  int half = ofdm->chanest_alt == OFDM_CHANEST_T4F3   ? 1
++             : ofdm->chanest_alt == OFDM_CHANEST_T4F5 ? 2
++                                                      : 0;
++  /* the slope across carriers was updated once this frame by ofdm_chanest_alt */
++  float th = half ? cargf(ofdm->chanest_slope + 1E-12f) : 0.0f;
++  static const float w3[3] = {1, 2, 1}, w5[5] = {1, 2, 3, 2, 1};
++  const float *wv = half == 1 ? w3 : w5;
++  for (int i = 1; i <= nc; i++) {
++    complex float h = g[i];
++    if (half) {
++      float w = 0.0f;
++      h = 0.0f;
++      for (int d = -half; d <= half; d++) {
++        int q = i + d;
++        if (q < 1 || q > nc) continue;
++        h += wv[d + half] * g[q] * cmplxconj(th * d);
++        w += wv[d + half];
++      }
++      h /= w;
++    }
++    aphase[i] = cargf(h);
++    aamp[i] = cabsf(h);
++  }
++}
++
+ static void ofdm_chanest_alt(struct OFDM *ofdm, float *aphase, float *aamp) {
+   int nc = ofdm->nc;
+   complex float g[nc + 2];
+@@ -1863,6 +2165,7 @@ static void ofdm_chanest_alt(struct OFDM *ofdm, float *aphase, float *aamp) {
+ 
+ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+   int prev_timing_est = ofdm->timing_est;
++  int mx_sp_before = ofdm->sample_point;
+   int i, j, k, rr, st, en;
+ 
+   if (ofdm->rx_bpf_en) {
+@@ -1913,6 +2216,19 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+     ofdm->sample_point =
+         min(ofdm->timing_est + ofdm->ncp - 4, ofdm->sample_point);
+   }
++  if (mx_auto) mx_place(ofdm, woff_est, ofdm->sample_point - mx_sp_before);
++  if (mx_auto) {
++    /* the variant's receiver is the placed chain: its window drives the
++     * frame grid too, so a lost stock estimate cannot walk the grid away */
++    ofdm->timing_est = mx_w - ofdm->ncp / 2;
++    ofdm->sample_point = mx_w;
++  }
++  if (mx_tpos >= 0) {
++    if (ofdm->sync_state == trial && ofdm->sync_counter == 0)
++      mx_sp = ofdm->timing_est + mx_tpos;
++    mx_sp = max(ofdm->timing_est + mx_tpos - 4, mx_sp);
++    mx_sp = min(ofdm->timing_est + mx_tpos + 4, mx_sp);
++  }
+ 
+   /*
+    * Convert the time-domain samples to the frequency-domain using the rx_sym
+@@ -1961,7 +2277,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+   /*
+    * "Previous" pilot symbol is one modem frame above.
+    */
+-  st = ofdm->rxbufst + ofdm->samplespersymbol + 1 + ofdm->sample_point;
++  st = ofdm->rxbufst + ofdm->samplespersymbol + 1 + MX_SP(ofdm);
+   en = st + ofdm->m;
+ 
+   complex float work[ofdm->m];
+@@ -2000,7 +2316,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+    */
+   for (rr = 0; rr < (ofdm->ns + 1); rr++) {
+     st = ofdm->rxbufst + ofdm->samplespersymbol + ofdm->samplesperframe +
+-         (rr * ofdm->samplespersymbol) + 1 + ofdm->sample_point;
++         (rr * ofdm->samplespersymbol) + 1 + MX_SP(ofdm);
+     en = st + ofdm->m;
+ 
+     /* down-convert at current timing instant----------------------------------
+@@ -2049,7 +2365,7 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+    * all pilots.
+    */
+   st = ofdm->rxbufst + ofdm->samplespersymbol + (3 * ofdm->samplesperframe) +
+-       1 + ofdm->sample_point;
++       1 + MX_SP(ofdm);
+   en = st + ofdm->m;
+ 
+   /* down-convert at current timing instant------------------------------- */
+@@ -2208,6 +2524,9 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+   float sum_amp = 0.0f;
+ 
+   for (rr = 0; rr < ofdm->rowsperframe; rr++) {
++    float aph_r[ofdm->nc + 2], aam_r[ofdm->nc + 2];
++    if (ofdm->chanest_alt && mx_interp)
++      ofdm_chanest_row(ofdm, (float)(rr + 1) / ofdm->ns, aph_r, aam_r);
+     /*
+      * Note the i starts with the second carrier, ends with Nc+1.
+      * so we ignore the first and last carriers.
+@@ -2245,8 +2564,10 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+ 
+       if (ofdm->chanest_alt) {
+         ofdm->rx_np_alt[(rr * ofdm->nc) + (i - 1)] =
+-            ofdm->rx_sym[rr + 2][i] * cmplxconj(aphase_alt[i]);
+-        ofdm->rx_amp_alt[(rr * ofdm->nc) + (i - 1)] = aamp_alt[i];
++            ofdm->rx_sym[rr + 2][i] *
++            cmplxconj(mx_interp ? aph_r[i] : aphase_alt[i]);
++        ofdm->rx_amp_alt[(rr * ofdm->nc) + (i - 1)] =
++            mx_interp ? aam_r[i] : aamp_alt[i];
+       }
+ 
+       /*
+@@ -2282,10 +2603,14 @@ static void ofdm_demod_core(struct OFDM *ofdm, int *rx_bits) {
+       ofdm->nin = ofdm->samplesperframe + tshift;
+       ofdm->timing_est -= tshift;
+       ofdm->sample_point -= tshift;
++      mx_sp -= tshift;
++      mx_w -= tshift;
+     } else if (ofdm->timing_est < -thresh) {
+       ofdm->nin = ofdm->samplesperframe - tshift;
+       ofdm->timing_est += tshift;
+       ofdm->sample_point += tshift;
++      mx_sp += tshift;
++      mx_w += tshift;
+     }
+   }
+ 
+diff --git a/utils/rx_bench.c b/utils/rx_bench.c
+index 60cde89..f40cd24 100644
+--- a/utils/rx_bench.c
++++ b/utils/rx_bench.c
+@@ -42,7 +42,9 @@ static bench_rng rng = {1357911131517ULL};
+ static double gauss(void) { return bench_rng_gauss(&rng); }
+ static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
+ 
+-typedef struct { int chanest; char name[32]; } variant_t;
++typedef struct { int chanest; int tpos; int interp; int autop; char name[32]; } variant_t;
++extern int mx_tpos, mx_interp, mx_auto, mx_auto_dbg;
++extern float mx_auto_thr, mx_auto_k;
+ 
+ int main(int argc, char **argv) {
+   if (argc < 7) {
+@@ -66,11 +68,24 @@ int main(int argc, char **argv) {
+   strncpy(tmp, vlist, sizeof(tmp) - 1); tmp[sizeof(tmp) - 1] = 0;
+   for (char *t = strtok(tmp, ","); t && nv < 16; t = strtok(NULL, ",")) {
+     strncpy(v[nv].name, t, 31); v[nv].name[31] = 0;
+-    if (!strcmp(t, "stock")) v[nv].chanest = OFDM_CHANEST_OFF;
+-    else if (!strcmp(t, "t4")) v[nv].chanest = OFDM_CHANEST_T4;
+-    else if (!strcmp(t, "t4f3")) v[nv].chanest = OFDM_CHANEST_T4F3;
+-    else if (!strcmp(t, "t4f5")) v[nv].chanest = OFDM_CHANEST_T4F5;
+-    else { fprintf(stderr, "unknown variant '%s': stock, t4, t4f3, t4f5\n", t); return 1; }
++    v[nv].chanest = OFDM_CHANEST_OFF; v[nv].tpos = -1; v[nv].interp = 0; v[nv].autop = 0;
++    {
++      char one[64];
++      strncpy(one, t, 63); one[63] = 0;
++      char *sv = NULL;
++      for (char *q = strtok_r(one, "+", &sv); q; q = strtok_r(NULL, "+", &sv)) {
++        if (!strcmp(q, "stock")) ;
++        else if (!strcmp(q, "t4")) v[nv].chanest = OFDM_CHANEST_T4;
++        else if (!strcmp(q, "t4f3")) v[nv].chanest = OFDM_CHANEST_T4F3;
++        else if (!strcmp(q, "t4f5")) v[nv].chanest = OFDM_CHANEST_T4F5;
++        else if (!strcmp(q, "li")) v[nv].interp = 1;
++        else if (!strcmp(q, "cr")) v[nv].interp = 2;
++        else if (!strcmp(q, "ti")) v[nv].interp = 3;
++        else if (!strcmp(q, "tpa")) v[nv].autop = 1;
++        else if (q[0] == 't' && q[1] == 'p' && q[2] >= '0' && q[2] <= '9') v[nv].tpos = atoi(q + 2);
++        else { fprintf(stderr, "unknown token '%s'\n", q); return 1; }
++      }
++    }
+     nv++;
+   }
+ 
+@@ -147,6 +162,10 @@ int main(int argc, char **argv) {
+       int any = 0;
+       for (int k = 0; k < nv; k++) {
+         int ss = 0, got = 0;
++        mx_tpos = v[k].tpos; mx_interp = v[k].interp; mx_auto = v[k].autop;
++        if (getenv("MXDBG")) mx_auto_dbg = 1;
++        if (getenv("MXTHR")) mx_auto_thr = (float)atof(getenv("MXTHR"));
++        if (getenv("MXK")) mx_auto_k = (float)atof(getenv("MXK"));
+         bench_run_burst(rx[k], buf, ntot, 0, 0.0, out, zero_noise, NULL, &ss, &got, NULL, NULL);
+         if (got && memcmp(out, payload, (size_t)nbytes - 2)) got = 0;
+         acq[k] += ss; del[k] += got; any |= got;

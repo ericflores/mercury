@@ -42,6 +42,8 @@
 #include "../datalink_broadcast/bcast_status.h"
 #include "../datalink_broadcast/kiss.h"     /* MAX_PAYLOAD */
 #include "channel_busy.h"
+#include "rx_blanker.h"
+#include "rx_notch.h"
 #include "tx_pacing.h"
 #include "freedv_api.h"
 #include "modem_freedv.h"
@@ -185,6 +187,51 @@ void modem_set_tx_delay_ms(int delay_ms)
 int modem_get_tx_delay_ms(void)
 {
     return atomic_load(&g_tx_delay_ms);
+}
+
+/* Impulse blanker on the captured audio (docs/improvements/08): the
+ * threshold in hundredths, 0 = off (the default).  Read once, when the
+ * receive thread starts; MERCURY_BLANKER=<k> overrides the ini value. */
+static _Atomic int g_rx_blanker_k100 = 0;
+
+void modem_set_rx_blanker(float k)
+{
+    if (!(k > 0.0f))  k = 0.0f;
+    if (k > 100.0f)   k = 100.0f;
+    atomic_store(&g_rx_blanker_k100, (int)(k * 100.0f + 0.5f));
+}
+
+/* Automatic notch for steady carriers on the captured audio
+ * (docs/improvements/07, "Notch for strong carriers"): off by default.  Read
+ * once, when the receive thread starts; MERCURY_NOTCH=1 overrides the ini
+ * value (any other value switches it off). */
+static _Atomic bool g_rx_notch = false;
+
+void modem_set_rx_notch(bool on)
+{
+    atomic_store(&g_rx_notch, on);
+}
+
+static bool rx_notch_setting(void)
+{
+    const char *e = getenv("MERCURY_NOTCH");
+    if (e && *e)
+        return e[0] == '1';
+    return atomic_load(&g_rx_notch) || modem_freedv_rx_all();
+}
+
+static float rx_blanker_setting(void)
+{
+    const char *e = getenv("MERCURY_BLANKER");
+    if (e && *e)
+    {
+        float k = (float)atof(e);
+        return k > 0.0f && k <= 100.0f ? k : 0.0f;
+    }
+    int k100 = atomic_load(&g_rx_blanker_k100);
+    if (!k100 && modem_freedv_rx_all())
+        k100 = 800; /* the recommended threshold (docs/BLANKER-FINDINGS.md) */
+    return (float)k100 / 100.0f;
 }
 
 float modem_get_tx_peak_dbfs(void)
@@ -2043,6 +2090,11 @@ static void modem_apply_crc_seed(uint16_t seed)
     }
     pthread_mutex_unlock(&modem_pool_lock);
     HLOGD("modem", "session CRC seed %s", seed ? "set" : "cleared");
+    /* The value, in the timing log: a recording of the session
+     * (MERCURY_RX_DUMP) can only be decoded offline (utils/rx_replay) with
+     * the seed its payload frames carry in their CRC. */
+    if (seed)
+        HLOGT("modem", "session CRC seed 0x%04x", seed);
 }
 static int rx_decoder_adopt(rx_decoder_state_t *state, modem_codec_t codec, int mode,
                             int max_samples, size_t bytes_cap);
@@ -3066,6 +3118,20 @@ void *rx_thread(void *g_modem)
     generic_modem_t *modem = (generic_modem_t *)g_modem;
     int32_t *capture_i32 = NULL;
     int16_t *capture_i16 = NULL;
+    /* Off (k = 0) it is never called, so the decoders get the captured audio
+     * bit for bit.  On, every plane gets the blanked audio, 8 ms later. */
+    rx_blanker_t blanker;
+    uint64_t blanker_mark_seen = 0, blanker_mark_blanked = 0;
+    rx_blanker_init(&blanker, rx_blanker_setting(), 8000);
+    if (blanker.k > 0.0f)
+        HLOGI("modem-rx", "impulse blanker on, threshold %.2f", (double)blanker.k);
+    /* The carrier notch: off, it is never called.  Static: its spectra are
+     * 33 kB, and there is one receive thread. */
+    static rx_notch_t notch;
+    uint64_t notch_engaged_seen = 0, notch_released_seen = 0;
+    rx_notch_init(&notch, rx_notch_setting(), 8000);
+    if (notch.on)
+        HLOGI("modem-rx", "carrier notch on");
     int capture_cap = 0;
     /* One worker per plane.  rx_thread keeps ownership of reading
      * capture_buffer, the flush policy and the spectrum/busy work; the workers
@@ -3436,6 +3502,42 @@ void *rx_thread(void *g_modem)
             capture_i16[i] = (int16_t)(capture_i32[i] >> 16);
         }
         rx_dump_chunk(capture_i16, chunk_samples);
+
+        /* After the dump, so a recording stays raw and the blanker can be
+         * tried on it offline (utils/rx_replay); before the tee, so every
+         * plane gets the same audio. */
+        /* The notch first: a carrier that is still there would sit in the
+         * blanker's level. */
+        if (notch.on)
+        {
+            rx_notch_process(&notch, capture_i16, chunk_samples);
+            if (notch.engaged != notch_engaged_seen || notch.released != notch_released_seen)
+            {
+                float nf[RX_NOTCH_MAX];
+                int nn = rx_notch_active(&notch, nf, RX_NOTCH_MAX);
+                char msg[96] = "none";
+                int off = 0;
+                for (int q = 0; q < nn && off < (int)sizeof(msg) - 16; q++)
+                    off += snprintf(msg + off, sizeof(msg) - (size_t)off, "%s%.1f Hz", q ? ", " : "", (double)nf[q]);
+                HLOGI("modem-rx", "carrier notch: %s", msg);
+                notch_engaged_seen = notch.engaged;
+                notch_released_seen = notch.released;
+            }
+        }
+        if (blanker.k > 0.0f)
+        {
+            rx_blanker_process(&blanker, capture_i16, chunk_samples);
+            if (blanker.seen - blanker_mark_seen >= 10u * 8000u)
+            {
+                uint64_t nb = blanker.blanked - blanker_mark_blanked;
+                if (nb)
+                    HLOGI("modem-rx", "blanker: %.3f %% of the last 10 s blanked (%llu impulses so far)",
+                          100.0 * (double)nb / (double)(blanker.seen - blanker_mark_seen),
+                          (unsigned long long)blanker.impulses);
+                blanker_mark_seen = blanker.seen;
+                blanker_mark_blanked = blanker.blanked;
+            }
+        }
 
         /* Tee the chunk to both planes.  A worker that has fallen behind
          * overflows its own ring: drop there and log, never block the

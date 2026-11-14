@@ -362,10 +362,57 @@ void init_c_v_nodes(struct c_node *c_nodes, int shift, int NumberParityBits,
 ///////////////////////////////////////
 /* function for doing the MP decoding */
 // Returns the iteration count
+/* Early termination (Mercury, docs/improvements/23-rx-effort.md).  A decode
+ * that will converge raises the number of satisfied parity checks iteration
+ * after iteration; one that will not stalls around a level set by the noise
+ * and stays there to max_iter, which is where the time of a failed frame
+ * goes (100 iterations against a handful for a frame that decodes).  With
+ * early_stop on, the decode is abandoned once STALL_MIN_ITERS iterations have
+ * run, the best count has not improved for STALL_ITERS iterations, and that
+ * best is below STALL_FRAC of the checks.
+ *
+ * STALL_FRAC is what decides whether frames are lost.  At the cliff a decode
+ * that ends up converging can sit between 80 % and 97 % of the checks for
+ * more than ten iterations first: with the specification's 0.97 DATAC1 lost
+ * 3 frames of 37 at +1 dB, with 0.90 it lost 3 of 30, with 0.80 none, for
+ * the same time saved on the frames that fail (their best count is under
+ * 80 %).  docs/RX-EFFORT-FINDINGS.md has the runs.
+ *
+ * LDPC_ES_MIN, LDPC_ES_STALL and LDPC_ES_FRAC in the environment override the
+ * three values, for bench sweeps only. */
+#define STALL_MIN_ITERS 15
+#define STALL_ITERS 10
+#define STALL_FRAC 0.80f
+/* Only the long codes (DATAC1's 4096 checks, DATAC17's and QAM16C2's 6480).
+ * On the short ones the count of satisfied checks is too noisy to tell a
+ * decode that will converge from one that will not: with the rule on, DATAC3
+ * (1024 checks) lost 11 frames of 127 at -4 dB and DATAC15 11 of 93 at
+ * -11 dB, and their decodes are the cheap ones anyway. */
+#define STALL_MIN_PARITY 2048
+
+static int SumProductStall(int *parityCheckCount, char DecodedBits[],
+                           struct c_node c_nodes[], struct v_node v_nodes[],
+                           int CodeLength, int NumberParityBits, int max_iter,
+                           float r_scale_factor, float q_scale_factor,
+                           int data[], int early_stop, float *posterior);
+
 int SumProduct(int *parityCheckCount, char DecodedBits[],
                struct c_node c_nodes[], struct v_node v_nodes[], int CodeLength,
                int NumberParityBits, int max_iter, float r_scale_factor,
                float q_scale_factor, int data[]) {
+  return SumProductStall(parityCheckCount, DecodedBits, c_nodes, v_nodes,
+                         CodeLength, NumberParityBits, max_iter,
+                         r_scale_factor, q_scale_factor, data, 0, NULL);
+}
+
+static int SumProductStall(int *parityCheckCount, char DecodedBits[],
+                           struct c_node c_nodes[], struct v_node v_nodes[],
+                           int CodeLength, int NumberParityBits, int max_iter,
+                           float r_scale_factor, float q_scale_factor,
+                           int data[], int early_stop, float *posterior) {
+  int best_ssum = -1, best_iter = 0;
+  (void)r_scale_factor;
+  (void)q_scale_factor;
   int result;
   int bitErrors;
   int i, j, iter;
@@ -424,6 +471,10 @@ int SumProduct(int *parityCheckCount, char DecodedBits[],
       if (Qi < 0) {
         DecodedBits[i] = 1;
       }
+      /* the decoder's belief about this bit after this iteration (positive:
+       * 0), for decision-directed channel estimation (Mercury,
+       * docs/improvements/20); the last iteration's values are what is left */
+      if (posterior) posterior[i] = Qi;
 
       /* now subtract to get the extrinsic information */
       for (j = 0; j < v_nodes[i].degree; j++) {
@@ -454,6 +505,26 @@ int SumProduct(int *parityCheckCount, char DecodedBits[],
       result = iter + 1;
       break;
     }
+
+    if (early_stop && NumberParityBits >= STALL_MIN_PARITY) {
+      static int tune_init, tune_min = STALL_MIN_ITERS, tune_stall = STALL_ITERS;
+      static float tune_frac = STALL_FRAC;
+      if (!tune_init) {
+        tune_init = 1;
+        if (getenv("LDPC_ES_MIN")) tune_min = atoi(getenv("LDPC_ES_MIN"));
+        if (getenv("LDPC_ES_STALL")) tune_stall = atoi(getenv("LDPC_ES_STALL"));
+        if (getenv("LDPC_ES_FRAC")) tune_frac = (float)atof(getenv("LDPC_ES_FRAC"));
+      }
+      if (ssum > best_ssum) {
+        best_ssum = ssum;
+        best_iter = iter;
+      }
+      if (iter + 1 >= tune_min && iter - best_iter >= tune_stall &&
+          (float)best_ssum < tune_frac * (float)NumberParityBits) {
+        result = iter + 1;
+        break;
+      }
+    }
   }
 
   return (result);
@@ -463,6 +534,14 @@ int SumProduct(int *parityCheckCount, char DecodedBits[],
 
 int run_ldpc_decoder(struct LDPC *ldpc, uint8_t out_char[], float input[],
                      int *parityCheckCount) {
+  return run_ldpc_decoder_post(ldpc, out_char, input, parityCheckCount, NULL);
+}
+
+/* The same, also giving the posterior soft bit of every bit of the codeword
+ * (CodeLength values, in the order of input[]; positive means 0) when
+ * posterior is not NULL. */
+int run_ldpc_decoder_post(struct LDPC *ldpc, uint8_t out_char[], float input[],
+                          int *parityCheckCount, float *posterior) {
   int max_iter, dec_type;
   float q_scale_factor, r_scale_factor;
   int max_row_weight, max_col_weight;
@@ -517,9 +596,10 @@ int run_ldpc_decoder(struct LDPC *ldpc, uint8_t out_char[], float input[],
   for (i = 0; i < CodeLength; i++) DecodedBits[i] = 0;
 
   /* Call function to do the actual decoding */
-  int iter = SumProduct(parityCheckCount, DecodedBits, c_nodes, v_nodes,
-                        CodeLength, NumberParityBits, max_iter, r_scale_factor,
-                        q_scale_factor, data_int);
+  int iter = SumProductStall(parityCheckCount, DecodedBits, c_nodes, v_nodes,
+                             CodeLength, NumberParityBits, max_iter,
+                             r_scale_factor, q_scale_factor, data_int,
+                             ldpc->early_stop, posterior);
 
   for (i = 0; i < CodeLength; i++) out_char[i] = DecodedBits[i];
 
@@ -661,6 +741,38 @@ void symbols_to_llrs(float llr[], COMP rx_psk_symbols[], float rx_amps[],
   }
   FREE(bit_likelihood);
   FREE(symbol_likelihood);
+}
+
+/* The inverse view of symbols_to_llrs() (Mercury, docs/improvements/20): the
+ * expected constellation point of each symbol under the soft bits, with the
+ * same constellation and the same bit labelling as Somap() above (bit k of a
+ * symbol is bit bps-1-k of the point's index; a positive soft bit means 0).
+ * A symbol the soft bits are sure of comes out on a constellation point; one
+ * they know nothing about comes out near zero, and so carries no weight
+ * where the symbols are used as channel references. */
+void llrs_to_soft_symbols(COMP sym[], const float llr[], int bps, int nsyms) {
+  assert((bps == 2) || (bps == 4));
+  const COMP *S = bps == 2 ? S_matrix_qpsk : S_matrix_qam16;
+  int M = 1 << bps;
+  for (int n = 0; n < nsyms; n++) {
+    float p1[4];
+    for (int k = 0; k < bps; k++) {
+      float l = llr[bps * n + k];
+      if (l > 30.0f) l = 30.0f;
+      if (l < -30.0f) l = -30.0f;
+      p1[k] = 1.0f / (1.0f + expf(l));
+    }
+    float re = 0.0f, im = 0.0f;
+    for (int i = 0; i < M; i++) {
+      float p = 1.0f;
+      for (int k = 0; k < bps; k++)
+        p *= (i >> (bps - 1 - k)) & 1 ? p1[k] : 1.0f - p1[k];
+      re += p * S[i].real;
+      im += p * S[i].imag;
+    }
+    sym[n].real = re;
+    sym[n].imag = im;
+  }
 }
 
 /*

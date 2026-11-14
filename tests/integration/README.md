@@ -88,6 +88,9 @@ conditions (all optional; default is codec2 `ch` on an effectively clean link):
 | `MERCURY_CH_GAIN` | linear channel gain (default 1.0) |
 | `MERCURY_CH_NO_FWD` / `_REV` | per-direction noise override (asymmetric link: A→B forward data vs B→A reverse polls and patterns); both transports (FIFO and `-x sock`) |
 | `MERCURY_CH_FADING_FWD` / `_REV` | per-direction fading profile (`none` disables one direction) |
+| `MERCURY_CH_TONE` | `Hz,dBFS`: a steady carrier added to what the receiving station hears, after the channel (`watterson` only; peak against full scale; a keyed station's signal sits near -13 dBFS). `_FWD` / `_REV` for one direction (`none` clears it) |
+| `MERCURY_CH_IMPULSES` | `per_second,dBFS[,ms]`: noise bursts added the same way (`watterson` only; rms against full scale; 2 ms unless given). `_FWD` / `_REV` for one direction |
+| `MERCURY_TEST_RX_DUMP` | with `MERCURY_TEST_LOGDIR`: each station records what its decoders were handed (`A.rx.s16`, `B.rx.s16`, s16le at 8 kHz) for `utils/rx_replay`; the session's CRC seed is in the timing logs |
 | `MERCURY_TEST_PAYLOAD_KB` | transfer size in KB (default ~102 bytes = 3 DATAC15 frames) |
 | `MERCURY_TEST_LOGDIR` | directory to keep per-instance logs (default: temp, deleted) |
 | `MERCURY_TEST_SEED` | the channel's noise/fading seed: unset = fixed, `random` = a new one per test, a number = rerun that seed (see below) |

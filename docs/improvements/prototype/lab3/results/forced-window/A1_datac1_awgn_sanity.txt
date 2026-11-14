@@ -1,0 +1,4 @@
+DATAC1 512 B, burst 4.40 s, chan AWGN, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+SNR3k    meas            stock          tp4         tp24         tp44         t4f3    t4f3+tp44        t4+ti      t4f3+ti        t4+li        t4+cr   (acquired/delivered per 30)
+   +0.0    +0.00      30/0         30/0         30/0         30/0         30/29        30/29        30/1         30/29        30/0         30/0       any  30
+   +1.0    +1.00      30/23        30/26        30/18        30/27        30/29        30/30        30/29        30/29        30/23        30/23      any  30

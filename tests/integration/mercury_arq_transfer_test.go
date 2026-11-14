@@ -94,6 +94,17 @@ func TestMercuryARQTransfer(t *testing.T) {
 	if err != nil {
 		t.Skipf("channel simulator unavailable: %v", err)
 	}
+	// Carrier and impulse interference is the watterson tool's: ch has no
+	// such options, and a run that asked for it must not pass without it.
+	if params.Engine != "watterson" {
+		for _, k := range []string{"MERCURY_CH_TONE", "MERCURY_CH_IMPULSES"} {
+			for _, sfx := range []string{"", "_FWD", "_REV"} {
+				if os.Getenv(k+sfx) != "" {
+					t.Fatalf("%s needs MERCURY_CH_ENGINE=watterson", k+sfx)
+				}
+			}
+		}
+	}
 
 	if v := os.Getenv("MERCURY_CH_NO"); v != "" {
 		no, err := strconv.ParseFloat(v, 64)
@@ -170,6 +181,13 @@ func TestMercuryARQTransfer(t *testing.T) {
 		// and raising the console level perturbs the timing enough to hide
 		// the races worth diagnosing.
 		timing := filepath.Join(t.TempDir(), name+".timing.log")
+		// MERCURY_TEST_LOGDIR keeps it with the console logs: the timing log
+		// is where a station says which optional decode attempt delivered a
+		// frame ("rx decode path"), which an A/B of the receiver switches
+		// counts after the run.
+		if d := os.Getenv("MERCURY_TEST_LOGDIR"); d != "" {
+			timing = filepath.Join(d, name+".timing.log")
+		}
 		timingLogs[name] = timing
 		transport := []string{"-x", "fifo", "-i", rxPath, "-o", txPath}
 		if useSock {
@@ -197,6 +215,14 @@ func TestMercuryARQTransfer(t *testing.T) {
 		}
 		cmd := exec.CommandContext(ctx, stationBin, args...)
 		cmd.Dir = repoRoot
+		// MERCURY_TEST_RX_DUMP=1 (with MERCURY_TEST_LOGDIR): each station
+		// records what its decoders were handed, A.rx.s16 and B.rx.s16 (s16le,
+		// 8 kHz), for utils/rx_replay to decode again with other receiver
+		// switches.  One file per station: MERCURY_RX_DUMP names a single
+		// file, and both stations inherit this process's environment.
+		if d := os.Getenv("MERCURY_TEST_LOGDIR"); d != "" && os.Getenv("MERCURY_TEST_RX_DUMP") != "" {
+			cmd.Env = append(os.Environ(), "MERCURY_RX_DUMP="+filepath.Join(d, name+".rx.s16"))
+		}
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
 		if err := startChild(cmd); err != nil {

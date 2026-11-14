@@ -46,6 +46,8 @@ void ldpc_mode_specific_setup(struct OFDM *ofdm, struct LDPC *ldpc);
 void ldpc_encode_frame(struct LDPC *ldpc, int codeword[],
                        unsigned char tx_bits_char[]);
 void psk_modulate_frame(int bps, COMP tx_symbols[], int codeword[], int n);
+int ldpc_decode_frame_post(struct LDPC *ldpc, int *parityCheckCount, int *iter,
+                           uint8_t out_char[], float llr[], float post[]);
 void ldpc_decode_frame(struct LDPC *ldpc, int *parityCheckCount, int *iter,
                        uint8_t out_char[], float llr[]);
 int count_uncoded_errors(struct LDPC *ldpc, struct OFDM_CONFIG *config,

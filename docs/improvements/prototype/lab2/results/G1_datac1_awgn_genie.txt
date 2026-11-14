@@ -1,0 +1,7 @@
+DATAC1 512 B, chan AWGN
+SNR3k    meas           t4f5+cp2   genie+t4+cp2  genie2+t4+cp2   (acquired/delivered per 60)
+   -3.5    -3.50        60/0           60/0           60/0       any   0
+   -3.0    -3.00        60/0           60/1           60/16      any  16
+   -2.5    -2.50        60/0           60/41          60/54      any  54
+   -2.0    -2.00        60/0           60/56          60/56      any  57
+   -1.5    -1.50        60/33          60/59          60/59      any  59

@@ -1,0 +1,14 @@
+DATAC1 512 B, chan AWGN
+SNR3k    meas              stock   (acquired/delivered per 100)
+   +0.5    +0.50       100/3       any   3
+         failed frames (stock): 96; residual BER 0.0683; pieces fully right 50/2016 (2.5%); frames by share right [0..1]: 96 0 0 0 0 0 0 0
+DATAC1 512 B, chan CCIR 520 Poor: 2 ms, 1 Hz
+No       meas              stock   (acquired/delivered per 100)
+  -34.0    +3.88        99/68      any  68
+         failed frames (stock): 26; residual BER 0.0885; pieces fully right 17/546 (3.1%); frames by share right [0..1]: 24 2 0 0 0 0 0 0
+  -32.0    +1.88        96/13      any  13
+         failed frames (stock): 76; residual BER 0.1377; pieces fully right 43/1596 (2.7%); frames by share right [0..1]: 73 1 1 0 0 0 1 0
+QAM16C2 1215 B, chan AWGN
+SNR3k    meas              stock   (acquired/delivered per 60)
+   +8.0    +8.00        60/39      any  39
+         failed frames (stock): 21; residual BER 0.0894; pieces fully right 0/1050 (0.0%); frames by share right [0..1]: 21 0 0 0 0 0 0 0

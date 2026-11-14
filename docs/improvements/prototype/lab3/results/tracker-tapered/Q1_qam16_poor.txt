@@ -1,0 +1,3 @@
+QAM16C2 1215 B, burst 3.30 s, chan CCIR 520 Poor: 2 ms, 1 Hz, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+No       meas            stock          tpa         t4f3     t4f3+tpa   (acquired/delivered per 40)
+  -48.0   +13.52      34/33        34/34        34/34        34/34      any  34

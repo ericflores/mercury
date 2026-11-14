@@ -1,0 +1,4 @@
+DATAC1 512 B, chan ITU-R F.1487 mid latitude, disturbed NVIS: 7 ms, 1 Hz
+No       meas              stock           t4f3       genie+t4      genie2+t4   (acquired/delivered per 60)
+  -40.0    +9.80        59/15          59/15          59/35          59/36      any  36
+  -38.0    +7.81        59/8           59/8           59/26          59/29      any  29

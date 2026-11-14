@@ -1,0 +1,9 @@
+DATAC1 512 B, burst 4.40 s, chan AWGN, tone 0 Hz -99 dB, impulses 3.0/s +15 dB
+SNR3k    meas               c0         c0b4         c0b6   (acquired/delivered per 50)
+   +5.0    +5.00      50/49        50/50        50/50      any  50
+DATAC1 512 B, burst 4.40 s, chan AWGN, tone 0 Hz -99 dB, impulses 3.0/s +25 dB
+SNR3k    meas               c0         c0b4         c0b6   (acquired/delivered per 50)
+   +5.0    +5.00      49/0         50/50        50/50      any  50
+DATAC1 512 B, burst 4.40 s, chan AWGN, tone 0 Hz -99 dB, impulses 3.0/s +35 dB
+SNR3k    meas               c0         c0b4         c0b6   (acquired/delivered per 50)
+   +5.0    +5.00      44/0         50/50        50/50      any  50

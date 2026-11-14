@@ -113,6 +113,32 @@ struct OFDM_CONFIG {
   float EsNodB; /* EsNo est used for LDPC decoder */
 };
 
+/* Profile tracking (Mercury, docs/improvements/26): the heap state lives in
+ * ofdm.c, allocated when the feature is switched on. */
+struct OFDM_PT;
+
+/* Pilot-row correlations of one burst (Mercury, docs/improvements/10), kept
+ * when noise_weight or nv_stats is on and never in a profile replay.  The
+ * pilots are h = rx_sym * conj(pilot), one value per carrier:
+ *  - t1, t2: sums over carriers and frames of h_k * conj(h_{k+1}) and
+ *    h_k * conj(h_{k+2}), the same carrier one and two modem frames apart
+ *    (nt = frames summed, pt = the power of the h_k summed).  Noise is
+ *    independent from row to row, so it does not bias either sum;
+ *  - f1, f2: sums of h_i * conj(h_{i+1}) and h_i * conj(h_{i+2}) across
+ *    adjacent carriers of a pilot row (nf = rows, pf = their power, vf = the
+ *    squared second difference across carriers after removing the row's own
+ *    phase slope, which the FFT window's place in the prefix puts there);
+ *  - ev = the power of the equalised data symbols, summed.
+ * ofdm_chan_acc_result() turns them into a Doppler spread, a delay spread
+ * and a noise estimate. */
+struct ofdm_chan_acc {
+  complex float t1, t2, f1, f2;
+  float pt, pf, vf, ev;
+  int nt, nf, nvf, nev;
+};
+#define OFDM_PT_MAXTRK 8   /* tracked paths */
+#define OFDM_PT_MAXPATHS 3 /* paths one frame's matching pursuit can report */
+
 struct OFDM {
   struct OFDM_CONFIG config;
 
@@ -198,6 +224,80 @@ struct OFDM {
 
   float *rx_amp;
   float *aphase_est_pilot_log;
+
+  /* Alternative channel estimate (Mercury, docs/improvements/09): a second
+   * phase/amplitude reference per carrier averaged over more pilots than the
+   * stock two.  Only rx_np_alt/rx_amp_alt are written from it; sync, the
+   * unique word, hard decisions and the SNR estimate keep the stock one.
+   * chanest_alt 0 (default) computes nothing. */
+  int chanest_alt;
+  complex float *rx_np_alt;
+  float *rx_amp_alt;
+  complex float chanest_slope;
+
+  /* Cyclic-prefix recycling (Mercury, docs/improvements/19): 0 = off, else the
+   * guard in samples at the head of the prefix.  When on, every row the
+   * demodulator transforms is transformed a second time from a copy of its
+   * samples in which each prefix sample is averaged with its twin one symbol
+   * length away (rx_sym_cp, same shape as rx_sym), and the alternative
+   * estimate is run on those rows into rx_np_cp/rx_amp_cp with its own
+   * phase-slope accumulator.  Nothing the stock or the chanest_alt paths use
+   * is written from it. */
+  int cp_recycle;
+  complex float **rx_sym_cp;
+  complex float *rx_np_cp;
+  float *rx_amp_cp;
+  complex float chanest_slope_cp;
+
+  /* Noise profile (Mercury, docs/improvements/07), kept when noise_weight is
+   * on.  Two measurements per carrier, in the units of rx_sym squared:
+   *  - nv_carrier[1..nc]: every modem frame of a burst but the first adds the
+   *    squared residual of this frame's pilot against the mean of its two
+   *    neighbours in time, which cancels a slowly changing channel and leaves
+   *    noise and interference; nv_n counts the frames added, and nv_frame
+   *    holds the same summed over carriers, per modem frame;
+   *  - nv_data[1..nc]: every data symbol adds its squared distance to the
+   *    nearest constellation point; nv_dn counts the symbols per carrier.
+   * The pilot residual is blind to an interferer whose phase advances by a
+   * whole number of turns per modem frame (a carrier at a multiple of
+   * 1/frame period, 9.09 Hz for the 6 ms-prefix modes); the data symbols see
+   * it.  The data measurement reads low when decisions are wrong (near the
+   * cliff); the pilots do not.  ofdm_noise_profile_get() takes the larger.
+   * The packet receiver turns the profile into per-carrier weights for one
+   * more decode attempt.  Nothing the other paths use is written from it. */
+  int noise_weight;
+  int nv_stats;      /* keep the profile for telemetry though the weights are off */
+  float *nv_carrier; /* nc + 2 */
+  float *nv_data;    /* nc + 2 */
+  float *nv_frame;   /* np */
+  int nv_n;
+  int nv_dn;
+  struct ofdm_chan_acc chan_acc;
+
+  /* Window placement from the pilots' delay profile (Mercury,
+   * docs/improvements/26): 0 = off.  When on, the samples shifted into rxbuf
+   * are counted and the state the demodulator starts a burst from is saved,
+   * so that a burst whose decode attempts all failed can be demodulated a
+   * second time (ofdm_profile_replay()) by a chain whose FFT window and frame
+   * grid follow the paths found in the pilot rows instead of the stock
+   * correlator.  The live demodulator is not changed by any of it.  The
+   * fields below the switch are the tracker's state: live in the replay's
+   * scratch copy of this struct, idle in the instance itself. */
+  int profile_track;
+  struct OFDM_PT *pt;
+  int64_t rx_count;      /* samples shifted into rxbuf so far */
+  int pt_replay;         /* this struct is a replay's scratch copy */
+  int pt_first, pt_last; /* in a replay: the loop's answer to "first/last frame" */
+  int pt_stock_timing;   /* test only: a replay with the stock timing tracker */
+  int pt_w;              /* the placed window, same coordinates as sample_point */
+  int pt_hold;           /* frames since a path was last seen */
+  int pt_ntrk;
+  float pt_trk[OFDM_PT_MAXTRK];  /* tracked path lags, relative to the window */
+  float pt_trkw[OFDM_PT_MAXTRK]; /* their weights */
+  int pt_trka[OFDM_PT_MAXTRK];   /* frames since each was seen */
+  int pt_npaths;                 /* last detection: paths found... */
+  int pt_lag[OFDM_PT_MAXPATHS];  /* ...and their lags */
+  int pt_delta;                  /* last placement: shift chosen */
 
   uint8_t tx_uw[MAX_UW_BITS];
   int *uw_ind;
@@ -304,6 +404,65 @@ float ofdm_esno_est_dd(int bps, complex float *rx_sym, float *rx_amp, int nsym);
 float ofdm_snr_from_esno(struct OFDM *ofdm, float EsNodB);
 void ofdm_get_demod_stats(struct OFDM *ofdm, struct MODEM_STATS *stats,
                           complex float *rx_syms, int Nsymsperpacket);
+
+/* Profile tracking (docs/improvements/26-window-placement.md).
+ *
+ * ofdm_profile_paths(): matching pursuit on pilot rows seen through one FFT
+ * window.  H holds nrows rows of nc values, H[r*nc + i] = row_r[i+1] *
+ * conj(pilot[i+1]) (the carrier's value with the known symbol removed).  A
+ * path whose useful part starts -L samples after the window start (L negative:
+ * the window starts inside that path's prefix) rotates carrier i by
+ * exp(+j*2*pi*(i+1)*L/m).  Fills lag[] (-m/2 .. m/2-1, circular) and pw[]
+ * (energy explained per carrier) for up to OFDM_PT_MAXPATHS paths, strongest
+ * first, and ratio with the rows' energy over what the paths leave.  Returns
+ * the number of paths.  Needs the feature switched on (the lag table is
+ * allocated with it).
+ *
+ * ofdm_profile_place(): feeds one frame's paths to the tracks (ofdm->pt_*),
+ * chooses the shift of the window that leaves the least of another symbol
+ * inside it, applies it to ofdm->pt_w and to the tracks' lags and returns it.
+ * `first` starts the tracks afresh (a burst's first frame). */
+int ofdm_profile_paths(struct OFDM *ofdm, const complex float *H, int nrows,
+                       int *lag, float *pw, float *ratio);
+int ofdm_profile_place(struct OFDM *ofdm, int npaths, const int *lag,
+                       const float *pw, int first);
+void ofdm_profile_reset(struct OFDM *ofdm, int window);
+/* Demodulate the packet whose decode attempts have all just failed a second
+ * time, window and frame grid following the tracked paths, from the same
+ * samples.  Fills np*rowsperframe*nc symbols and amplitudes from the
+ * four-pilot-row estimate and returns the chain's own mean amplitude.
+ * Returns 0 when the first frame has left the buffer, the feature is off, or
+ * the packet is not the burst's first. */
+int ofdm_profile_replay(struct OFDM *ofdm, complex float *syms, float *amps,
+                        float *mean_amp);
+/* Test only: replay with the stock timing tracker instead of the new one. */
+void ofdm_profile_test_stock_timing(struct OFDM *ofdm, int on);
+/* Frames the last replay erased because their rows were past the buffer. */
+int ofdm_profile_nerased(struct OFDM *ofdm);
+
+/* The estimators behind dopp, dly, evm and evm_excess
+ * (docs/improvements/10-channel-telemetry.md).  Pure functions of the
+ * accumulators, so a test can feed them synthetic pilots.  `h0` is the pilot
+ * row of the frame, `h1` the next frame's and `h2` the one after it or NULL
+ * where there is none (the burst's last frame: its row still counts across
+ * carriers, but not in the time sums); all indexed 1..nc and already times
+ * the conjugate of the transmitted pilot. */
+void ofdm_chan_acc_reset(struct ofdm_chan_acc *a);
+void ofdm_chan_acc_add_frame(struct ofdm_chan_acc *a, int nc,
+                             const complex float *h0, const complex float *h1,
+                             const complex float *h2);
+struct ofdm_chan_est {
+  float dopp_hz;   /* Doppler spread (2 sigma of a Gaussian spectrum) */
+  float dly_ms;    /* separation of two equal paths with this decorrelation */
+  float noise_f;   /* per-pilot noise variance from second differences
+                      across carriers, after removing each row's phase slope */
+  float pilot_pwr; /* mean power of a pilot, noise included */
+  int ok_time, ok_freq;
+};
+/* T = spacing of pilot rows in s, df = carrier spacing in Hz.  Fills what the
+ * sums allow (ok_time, ok_freq say which); returns 0 when neither. */
+int ofdm_chan_acc_result(const struct ofdm_chan_acc *a, int nc, float row_dt,
+                         float df, struct ofdm_chan_est *out);
 
 #ifdef __cplusplus
 }

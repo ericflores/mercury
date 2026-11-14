@@ -66,6 +66,17 @@ void cfg_set_defaults(mercury_config *cfg)
     cfg->tnc_keepalive_s = 60;
     cfg->tnc_buffer_report_ms = 1000;
     cfg->tx_gain_db            = 0.0f;
+    cfg->rx_chanest            = 0;
+    cfg->rx_cp_recycle         = 0;
+    cfg->rx_profile_track      = false;
+    cfg->rx_noise_weight       = false;
+    cfg->rx_blanker            = 0.0f;
+    cfg->rx_notch              = false;
+    cfg->rx_early_stop         = false;
+    cfg->rx_decision_directed  = false;
+    cfg->chanstats             = false;
+    cfg->rx_improvements       = false;
+    cfg->qam16c2_tx_clip       = false;
     cfg->tx_delay_ms           = 10;
     cfg->retry_stagger_ms            = ARQ_RETRY_STAGGER_MS_DEFAULT;
     cfg->silence_fallback_s          = ARQ_SILENCE_FALLBACK_S_DEFAULT;
@@ -462,6 +473,33 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
     if (d >  20.0) d =  20.0;
     cfg->tx_gain_db = (float)d;
 
+    s = iniparser_getstring(ini, CFG_KEY_RX_CHANEST, NULL);
+    if (s)
+        cfg->rx_chanest = !strcmp(s, "auto") ? -1 : !strcmp(s, "t4")   ? 1
+                        : !strcmp(s, "t4f3") ? 2  : !strcmp(s, "t4f5") ? 3 : 0;
+
+    i = iniparser_getint(ini, CFG_KEY_RX_CP_RECYCLE, cfg->rx_cp_recycle);
+    if (i >= 0 && i <= 48) cfg->rx_cp_recycle = i;
+
+    b = iniparser_getboolean(ini, CFG_KEY_RX_PROFILE_TRACK, cfg->rx_profile_track ? 1 : 0);
+    cfg->rx_profile_track = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_RX_NOISE_WEIGHT, cfg->rx_noise_weight ? 1 : 0);
+    cfg->rx_noise_weight = (bool) b;
+    d = iniparser_getdouble(ini, CFG_KEY_RX_BLANKER, (double)cfg->rx_blanker);
+    if (d == 0.0 || (d >= 1.0 && d <= 100.0)) cfg->rx_blanker = (float)d;
+    b = iniparser_getboolean(ini, CFG_KEY_RX_NOTCH, cfg->rx_notch ? 1 : 0);
+    cfg->rx_notch = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_RX_EARLY_STOP, cfg->rx_early_stop ? 1 : 0);
+    cfg->rx_early_stop = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_RX_IMPROVEMENTS, cfg->rx_improvements ? 1 : 0);
+    cfg->rx_improvements = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_CHANSTATS, cfg->chanstats ? 1 : 0);
+    cfg->chanstats = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_RX_DECISION_DIRECTED, cfg->rx_decision_directed ? 1 : 0);
+    cfg->rx_decision_directed = (bool) b;
+    b = iniparser_getboolean(ini, CFG_KEY_QAM16C2_TX_CLIP, cfg->qam16c2_tx_clip ? 1 : 0);
+    cfg->qam16c2_tx_clip = (bool) b;
+
     i = iniparser_getint(ini, CFG_KEY_TX_DELAY_MS, cfg->tx_delay_ms);
     if (i >= 0 && i <= 2000) cfg->tx_delay_ms = i;
 
@@ -554,6 +592,7 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
     fprintf(f, "ui_tls_cert = %s\n",      cfg->tls_cert);
     fprintf(f, "ui_tls_key = %s\n",       cfg->tls_key);
     fprintf(f, "waterfall_enabled = %s\n", cfg->waterfall_enabled ? "true" : "false");
+    fprintf(f, "chanstats = %s\n",       cfg->chanstats ? "true" : "false");
     cfg_escape_str(escaped, sizeof(escaped), cfg->input_device);
     fprintf(f, "input_device = \"%s\"\n",  escaped);
 
@@ -605,6 +644,17 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
     fprintf(f, "\n[audio]\n");
     fprintf(f, "tx_gain_db = %.2f\n", cfg->tx_gain_db);
     fprintf(f, "tx_delay_ms = %d\n", cfg->tx_delay_ms);
+    fprintf(f, "rx_chanest = %s\n", cfg->rx_chanest == -1 ? "auto" : cfg->rx_chanest == 1 ? "t4"
+                                    : cfg->rx_chanest == 2 ? "t4f3" : cfg->rx_chanest == 3 ? "t4f5" : "off");
+    fprintf(f, "rx_cp_recycle = %d\n", cfg->rx_cp_recycle);
+    fprintf(f, "rx_profile_track = %s\n", cfg->rx_profile_track ? "true" : "false");
+    fprintf(f, "rx_noise_weight = %s\n", cfg->rx_noise_weight ? "true" : "false");
+    fprintf(f, "rx_blanker = %g\n", (double)cfg->rx_blanker);
+    fprintf(f, "rx_notch = %s\n", cfg->rx_notch ? "true" : "false");
+    fprintf(f, "rx_early_stop = %s\n", cfg->rx_early_stop ? "true" : "false");
+    fprintf(f, "rx_decision_directed = %s\n", cfg->rx_decision_directed ? "true" : "false");
+    fprintf(f, "rx_improvements = %s\n", cfg->rx_improvements ? "true" : "false");
+    fprintf(f, "qam16c2_tx_clip = %s\n", cfg->qam16c2_tx_clip ? "true" : "false");
 
     fprintf(f, "\n[tnc]\n");
     fprintf(f, "keepalive_s = %d\n", cfg->tnc_keepalive_s);

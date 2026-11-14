@@ -1,0 +1,4 @@
+DATAC1 512 B, burst 4.40 s, chan AWGN, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+SNR3k    meas            stock          tpa          tp8   (acquired/delivered per 200)
+   +0.5    +0.50     200/3        200/1        200/1       any   3
+   +1.0    +1.00     200/165      200/136      200/95      any 177

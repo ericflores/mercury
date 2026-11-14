@@ -1,0 +1,3 @@
+DATAC1 512 B, burst 4.40 s, chan ITU-R F.1487 mid latitude, disturbed NVIS: 7 ms, 1 Hz, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+No       meas            stock         tp44          tpa       t4+tpa   (acquired/delivered per 60)
+  -36.0    +5.80      59/6         59/14        59/19        59/24      any  26

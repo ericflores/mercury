@@ -1,0 +1,5 @@
+DATAC1 512 B, chan CCIR 520 Poor: 2 ms, 1 Hz
+No       meas           t4f3+cp3   genie+t4+cp3  genie2+t4+cp3   (acquired/delivered per 60)
+  -32.0    +1.79        57/36          57/51          57/53      any  53
+  -30.0    -0.20        54/5           54/29          54/33      any  33
+  -28.0    -2.21        42/0           42/4           42/6       any   6

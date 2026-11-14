@@ -245,6 +245,15 @@ void freedv_ofdm_data_open(struct freedv *f, struct freedv_advanced *adv) {
     f->rx_amps[i] = 0.0;
   }
 
+  f->rx_syms_alt = (COMP *)CALLOC(Nsymsperpacket, sizeof(COMP));
+  assert(f->rx_syms_alt != NULL);
+  f->rx_amps_alt = (float *)CALLOC(Nsymsperpacket, sizeof(float));
+  assert(f->rx_amps_alt != NULL);
+  f->rx_syms_cp = (COMP *)CALLOC(Nsymsperpacket, sizeof(COMP));
+  assert(f->rx_syms_cp != NULL);
+  f->rx_amps_cp = (float *)CALLOC(Nsymsperpacket, sizeof(float));
+  assert(f->rx_amps_cp != NULL);
+
   f->nin = f->nin_prev = ofdm_get_nin(f->ofdm);
   f->n_nat_modem_samples = ofdm_get_samples_per_packet(f->ofdm);
   f->n_nom_modem_samples = ofdm_get_samples_per_frame(f->ofdm);
@@ -508,6 +517,200 @@ static float freedv_snr_calib(int mode, float snr_raw) {
   }
 }
 
+/* One more decode attempt from a packet's worth of symbols and amplitudes
+ * (the alternative estimate, docs/improvements/09, or the same on recycled
+ * prefix samples, docs/improvements/19): payload extraction, de-interleave,
+ * LLRs, LDPC.  Returns the CRC class (0 = no frame) of the decoded codeword,
+ * after the same parity gate as the HARQ combine path: these attempts are
+ * reached on purpose at the cliff, where a decode that has not converged
+ * still has its 2^-16 chance at the CRC.  `codeword` must hold the longer of
+ * the code length and the payload bits. */
+static int decode_packet_from_syms(struct freedv *f, complex float *syms,
+                                   float *amps, float EsNo, float mean_amp,
+                                   uint8_t *codeword, int *pcc, int *iter,
+                                   float *post) {
+  struct OFDM *ofdm = f->ofdm;
+  struct LDPC *ldpc = f->ldpc;
+  int Nbitsperpacket = ofdm_get_bits_per_packet(ofdm);
+  int Npayloadbitsperpacket = Nbitsperpacket - ofdm->nuwbits - ofdm->ntxtbits;
+  int Npayloadsymsperpacket = Npayloadbitsperpacket / ofdm->bps;
+  COMP p_syms[Npayloadsymsperpacket];
+  float p_amps[Npayloadsymsperpacket];
+  COMP p_syms_de[Npayloadsymsperpacket];
+  float p_amps_de[Npayloadsymsperpacket];
+  short p_txt[f->ofdm_ntxtbits > 0 ? f->ofdm_ntxtbits : 1];
+  float p_llr[Npayloadbitsperpacket];
+  int txt_index = 0;
+  ofdm_disassemble_psk_modem_packet_with_text_amps(ofdm, syms, amps, p_syms,
+                                                   p_amps, p_txt, &txt_index);
+  gp_deinterleave_comp(p_syms_de, p_syms, Npayloadsymsperpacket);
+  gp_deinterleave_float(p_amps_de, p_amps, Npayloadsymsperpacket);
+  symbols_to_llrs(p_llr, p_syms_de, p_amps_de, EsNo, mean_amp, ofdm->bps,
+                  Npayloadsymsperpacket);
+  /* post, when asked for: the decoder's posterior soft bit of every payload
+   * bit, for the decision-directed attempt */
+  if (post != NULL)
+    ldpc_decode_frame_post(ldpc, pcc, iter, codeword, p_llr, post);
+  else
+    ldpc_decode_frame(ldpc, pcc, iter, codeword, p_llr);
+  if (!ldpc_harq_combine_parity_ok(*pcc, ldpc->NumberParityBits)) return 0;
+  return freedv_crc16_class(f, codeword, ldpc->data_bits_per_frame);
+}
+
+/* Decision-directed channel estimation
+ * (docs/improvements/20-decision-directed.md).
+ *
+ * The packet buffers hold symbols already corrected with an estimate that
+ * rests on the pilots alone: for a carrier in a modem frame, y = e^(-j
+ * theta) rx and an amplitude a, so that y is about a times the transmitted
+ * symbol.  With soft symbols s for the frame's data rows (the decoder's
+ * belief; |s| near 1 where it is sure, near 0 where it is not) the same
+ * carrier and frame give a better estimate of what is left of the channel
+ * after that correction:
+ *
+ *     h = (W a + sum_rows y conj(s)) / (W + sum_rows |s|^2)
+ *
+ * W a is the pilots' say: in this corrected domain the pilots' products sum
+ * to W times the amplitude estimate, real and positive, W being the number
+ * of pilots the base estimate is worth (2 for the stock estimate, 3.2 for
+ * the alternative estimate's 1,3,3,1 weights).  The symbols are then
+ * corrected by the phase of h and take |h| as their amplitude.  Working on
+ * the corrected symbols needs no copy of the raw rows, and each frame is
+ * referred to its own pilots, which is what the genie runs wanted (averaging
+ * raw pilots across frames lost 2.5 dB to the frequency loop's jitter). */
+#define DD_ROUNDS 2
+#define DD_W_STOCK 2.0f
+#define DD_W_ALT 3.2f
+
+typedef struct {
+  const complex float *syms;
+  const float *amps;
+  float mean_amp;
+  float w;
+  int pcc; /* -1: no candidate yet */
+} dd_base_t;
+
+/* A failed attempt offers itself as the base for the decision-directed
+ * attempt: the one whose decode satisfied most parity checks wins.  Its
+ * posterior (f->dd_post) is kept in f->dd_post_best. */
+static void dd_consider(struct freedv *f, dd_base_t *best,
+                        const complex float *syms, const float *amps,
+                        float mean_amp, float w, int pcc) {
+  if (!f->dd_enable || pcc <= best->pcc) return;
+  int nbits = ofdm_get_bits_per_packet(f->ofdm) - f->ofdm->nuwbits -
+              f->ofdm->ntxtbits;
+  memcpy(f->dd_post_best, f->dd_post, sizeof(float) * (size_t)nbits);
+  best->syms = syms;
+  best->amps = amps;
+  best->mean_amp = mean_amp;
+  best->w = w;
+  best->pcc = pcc;
+}
+
+/* Build f->dd_syms / f->dd_amps: the base's symbols corrected with the
+ * estimate that uses the soft symbols of post (payload soft bits). */
+static void dd_refine(struct freedv *f, const dd_base_t *base,
+                      const float *post) {
+  struct OFDM *ofdm = f->ofdm;
+  int Nbitsperpacket = ofdm_get_bits_per_packet(ofdm);
+  int Nsymsperpacket = Nbitsperpacket / ofdm->bps;
+  int Nsymsperframe = ofdm_get_bits_per_frame(ofdm) / ofdm->bps;
+  int Npayloadsyms =
+      (Nbitsperpacket - ofdm->nuwbits - ofdm->ntxtbits) / ofdm->bps;
+  int nc = ofdm->nc, rows = Nsymsperframe / nc;
+  COMP soft_de[Npayloadsyms], soft[Npayloadsyms];
+  complex float pkt[Nsymsperpacket];
+  uint8_t txt[ofdm->ntxtbits > 0 ? ofdm->ntxtbits : 1];
+  complex float *out = (complex float *)f->dd_syms;
+
+  /* soft symbols in the decoder's order, back through the interleaver, and
+   * into the packet with the unique word's known symbols in their places */
+  llrs_to_soft_symbols(soft_de, post, ofdm->bps, Npayloadsyms);
+  gp_interleave_comp(soft, soft_de, Npayloadsyms);
+  memset(txt, 0, sizeof(txt));
+  ofdm_assemble_psk_modem_packet_symbols(ofdm, pkt, soft, txt);
+
+  /* The refined estimates of adjacent carriers are averaged 1-2-1, as in
+   * proposal 09's estimate, where there are enough carriers for neighbours
+   * to resemble each other.  In this corrected domain each carrier's phase
+   * is already referred to its own base estimate, so there is no slope to
+   * remove first.  DATAC1 at -1.5 dB, 40 trials, on top of 09 + 19: 5
+   * frames without this attempt, 14 with it unsmoothed, 24 smoothed. */
+  int smooth = nc >= 9;
+  for (int fr = 0; fr < ofdm->np; fr++) {
+    complex float h[nc];
+    for (int c = 0; c < nc; c++) {
+      int k0 = fr * Nsymsperframe + c;
+      complex float num = base->w * base->amps[k0];
+      float den = base->w;
+      for (int rr = 0; rr < rows; rr++) {
+        int k = k0 + rr * nc;
+        num += base->syms[k] * conjf(pkt[k]);
+        den += crealf(pkt[k]) * crealf(pkt[k]) + cimagf(pkt[k]) * cimagf(pkt[k]);
+      }
+      h[c] = num / den;
+    }
+    for (int c = 0; c < nc; c++) {
+      int k0 = fr * Nsymsperframe + c;
+      complex float hc = h[c];
+      if (smooth) {
+        float wsum = 2.0f;
+        hc = 2.0f * h[c];
+        if (c > 0) { hc += h[c - 1]; wsum += 1.0f; }
+        if (c < nc - 1) { hc += h[c + 1]; wsum += 1.0f; }
+        hc /= wsum;
+      }
+      float mag = cabsf(hc);
+      complex float rot = mag > 1E-12f ? conjf(hc) / mag : 1.0f;
+      for (int rr = 0; rr < rows; rr++) {
+        int k = k0 + rr * nc;
+        out[k] = base->syms[k] * rot;
+        f->dd_amps[k] = mag;
+      }
+    }
+  }
+}
+
+/* Noise weights (docs/improvements/07-noise-aware-llr.md).  A carrier whose
+ * pilot residual says it carries more than NW_K times the noise of the
+ * median carrier gets its symbols and their amplitudes scaled by
+ * sqrt(median / its noise): inside the demapper the metric of a symbol is
+ * EsNo |r - amp S|^2 / mean_amp^2, so scaling r and amp by s multiplies that
+ * symbol's soft bits by s^2, which is the ratio of the noise variances.
+ * Every other carrier keeps a factor of exactly 1.
+ *
+ * Returns the number of carriers weighted down; 0 means the profile is flat
+ * and a weighted decode would be the unweighted one.
+ *
+ * NW_K 2.0 and NW_MIN_FRAMES 8 are the prototype's and the specification's
+ * starting values; the sweep is in docs/NOISE-WEIGHT-FINDINGS.md. */
+#define NW_K 2.0f
+#define NW_MIN_FRAMES 8
+static int noise_weight_scales(const struct OFDM *ofdm, float *scale) {
+  int nc = ofdm->nc, flagged = 0;
+  float v[nc], srt[nc];
+  if (ofdm->nv_n < NW_MIN_FRAMES || !ofdm_noise_profile_get(ofdm, v)) return 0;
+  for (int c = 0; c < nc; c++) srt[c] = v[c];
+  for (int a = 1; a < nc; a++)
+    for (int b = a; b > 0 && srt[b] < srt[b - 1]; b--) {
+      float t = srt[b];
+      srt[b] = srt[b - 1];
+      srt[b - 1] = t;
+    }
+  /* the lower median: with an even count, two interfered carriers of four
+   * must not become the reference */
+  float med = srt[(nc - 1) / 2] + 1e-12f;
+  for (int c = 0; c < nc; c++) {
+    if (v[c] > NW_K * med) {
+      scale[c] = sqrtf(med / v[c]);
+      flagged++;
+    } else {
+      scale[c] = 1.0f;
+    }
+  }
+  return flagged;
+}
+
 /*
   OFDM demod function that can support complex (float) or real (short)
   samples.  The real short samples are useful for low memory platforms such as
@@ -582,6 +785,29 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
            sizeof(complex float) * Nsymsperframe);
     memcpy(&rx_amps[Nsymsperpacket - Nsymsperframe], ofdm->rx_amp,
            sizeof(float) * Nsymsperframe);
+    if (ofdm->chanest_alt && f->rx_syms_alt != NULL) {
+      complex float *sa = (complex float *)f->rx_syms_alt;
+      memmove(sa, &sa[Nsymsperframe],
+              sizeof(complex float) * (Nsymsperpacket - Nsymsperframe));
+      memmove(f->rx_amps_alt, &f->rx_amps_alt[Nsymsperframe],
+              sizeof(float) * (Nsymsperpacket - Nsymsperframe));
+      memcpy(&sa[Nsymsperpacket - Nsymsperframe], ofdm->rx_np_alt,
+             sizeof(complex float) * Nsymsperframe);
+      memcpy(&f->rx_amps_alt[Nsymsperpacket - Nsymsperframe], ofdm->rx_amp_alt,
+             sizeof(float) * Nsymsperframe);
+    }
+
+    if (ofdm->cp_recycle && f->rx_syms_cp != NULL) {
+      complex float *sc = (complex float *)f->rx_syms_cp;
+      memmove(sc, &sc[Nsymsperframe],
+              sizeof(complex float) * (Nsymsperpacket - Nsymsperframe));
+      memmove(f->rx_amps_cp, &f->rx_amps_cp[Nsymsperframe],
+              sizeof(float) * (Nsymsperpacket - Nsymsperframe));
+      memcpy(&sc[Nsymsperpacket - Nsymsperframe], ofdm->rx_np_cp,
+             sizeof(complex float) * Nsymsperframe);
+      memcpy(&f->rx_amps_cp[Nsymsperpacket - Nsymsperframe], ofdm->rx_amp_cp,
+             sizeof(float) * Nsymsperframe);
+    }
 
     /* look for UW as frames enter packet buffer, note UW may span several
      * modem frames */
@@ -623,12 +849,26 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
        * as a fallback if the single-shot decode fails, so retained soft info
        * can never corrupt a frame that would have decoded on its own. */
       memcpy(llr_raw, llr, sizeof(float) * Npayloadbitsperpacket);
-      ldpc_decode_frame(ldpc, &parityCheckCount, &iter, decoded_codeword, llr);
+      /* With the decision-directed attempt on, the decoder also hands back
+       * its posterior soft bits; the decode itself is the same. */
+      float *dd_post = f->dd_enable ? f->dd_post : NULL;
+      dd_base_t dd_best = {NULL, NULL, 0.0f, 0.0f, -1};
+      if (dd_post != NULL)
+        ldpc_decode_frame_post(ldpc, &parityCheckCount, &iter, decoded_codeword,
+                               llr, dd_post);
+      else
+        ldpc_decode_frame(ldpc, &parityCheckCount, &iter, decoded_codeword, llr);
       memcpy(f->rx_payload_bits, decoded_codeword, Ndatabitsperpacket);
 
       if (strlen(ofdm->data_mode)) {
         int crc_class = freedv_crc16_class(f, f->rx_payload_bits, Ndatabitsperpacket);
         int crc_ok = crc_class != 0;
+        int combined_ok = 0;
+        f->rx_decode_path = 0;
+        f->rx_noise_flagged = 0;
+        if (!crc_ok)
+          dd_consider(f, &dd_best, rx_syms, rx_amps, ofdm->mean_amp,
+                      DD_W_STOCK, parityCheckCount);
         /* HARQ Chase combining FALLBACK: only when the single-shot decode
          * failed, add the retained running sum of prior (same-frame) LLRs and
          * retry.  Independent noise realisations of the same codeword add
@@ -676,6 +916,170 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
             memcpy(f->rx_payload_bits, decoded_codeword, Ndatabitsperpacket);
             crc_class = freedv_crc16_class(f, f->rx_payload_bits, Ndatabitsperpacket);
             crc_ok = crc_class != 0;
+            combined_ok = crc_ok;
+          }
+        }
+        if (combined_ok) f->rx_decode_path = 1;
+        /* Noise-weighted attempt (docs/improvements/07): when the pilots'
+         * residuals single out carriers with more noise than the rest (a CW
+         * carrier, an FSK signal, another station on part of the band), the
+         * packet is decoded once more with those carriers' soft bits scaled
+         * down, from the best symbols at hand: the recycled rows if that
+         * feature is on, else the alternative estimate's, else the stock
+         * ones.  Only on failure and only when a carrier is singled out, so
+         * a frame that decodes today is never touched and a flat profile
+         * costs nothing.  It runs before the unweighted attempts below
+         * because a profile that is not flat says which attempt is likely to
+         * work; they still run if it fails, so the set of frames delivered
+         * is the union either way.  Same parity gate. */
+        if (!crc_ok && ofdm->noise_weight) {
+          float nw_scale[ofdm->nc];
+          f->rx_noise_flagged = noise_weight_scales(ofdm, nw_scale);
+          if (f->rx_noise_flagged) {
+            const complex float *src = rx_syms;
+            const float *src_amps = rx_amps;
+            if (ofdm->cp_recycle && f->rx_syms_cp != NULL) {
+              src = (const complex float *)f->rx_syms_cp;
+              src_amps = f->rx_amps_cp;
+            } else if (ofdm->chanest_alt && f->rx_syms_alt != NULL) {
+              src = (const complex float *)f->rx_syms_alt;
+              src_amps = f->rx_amps_alt;
+            }
+            complex float nw_syms[Nsymsperpacket];
+            float nw_amps[Nsymsperpacket];
+            for (int s = 0; s < Nsymsperpacket; s++) {
+              float w = nw_scale[s % ofdm->nc];
+              nw_syms[s] = src[s] * w;
+              nw_amps[s] = src_amps[s] * w;
+            }
+            uint8_t nw_codeword[codeword_len];
+            int nw_pcc = 0, nw_iter = 0;
+            int nw_class = decode_packet_from_syms(
+                f, nw_syms, nw_amps, EsNo, ofdm->mean_amp, nw_codeword,
+                &nw_pcc, &nw_iter, NULL);
+            if (nw_class != 0) {
+              memcpy(f->rx_payload_bits, nw_codeword, Ndatabitsperpacket);
+              crc_class = nw_class;
+              crc_ok = 1;
+              parityCheckCount = nw_pcc;
+              iter = nw_iter;
+              f->rx_decode_path = 5;
+            }
+          }
+        }
+        /* Alternative channel estimate FALLBACK (docs/improvements/09): the
+         * stock estimate is the mean of two pilots per carrier, and its own
+         * noise costs a dB or more at the SNRs the rungs work at.  A packet
+         * that failed above is decoded once more from the symbols the
+         * estimate over four pilot rows (and, by mode, adjacent carriers)
+         * corrected.  Only on failure, so a frame that decodes today is
+         * never touched; the same parity gate as the combine path, because
+         * this too is reached on purpose at the cliff, where a decode that
+         * has not converged still has its 2^-16 chance at the CRC. */
+        if (!crc_ok && ofdm->chanest_alt && f->rx_syms_alt != NULL) {
+          uint8_t alt_codeword[codeword_len];
+          int alt_pcc = 0, alt_iter = 0;
+          int alt_class = decode_packet_from_syms(
+              f, (complex float *)f->rx_syms_alt, f->rx_amps_alt, EsNo,
+              ofdm->mean_amp, alt_codeword, &alt_pcc, &alt_iter, dd_post);
+          if (alt_class == 0)
+            dd_consider(f, &dd_best, (complex float *)f->rx_syms_alt,
+                        f->rx_amps_alt, ofdm->mean_amp, DD_W_ALT, alt_pcc);
+          if (alt_class != 0) {
+            memcpy(f->rx_payload_bits, alt_codeword, Ndatabitsperpacket);
+            crc_class = alt_class;
+            crc_ok = 1;
+            parityCheckCount = alt_pcc;
+            iter = alt_iter;
+            f->rx_decode_path = 2;
+          }
+        }
+        /* The same on the recycled rows (docs/improvements/19): the cyclic
+         * prefix's samples averaged with their twins one symbol length
+         * away, so less noise reaches every carrier.  Last, after the
+         * cheaper attempts and only on failure, so it can only add frames:
+         * the prototype, which recycled in the FFT input of every attempt,
+         * lost 2 frames in 100 at one point where the un-recycled attempt
+         * delivered them (COMPUTE-AND-NEURAL-RESEARCH.md, 3.1). */
+        if (!crc_ok && ofdm->cp_recycle && f->rx_syms_cp != NULL) {
+          uint8_t cp_codeword[codeword_len];
+          int cp_pcc = 0, cp_iter = 0;
+          int cp_class = decode_packet_from_syms(
+              f, (complex float *)f->rx_syms_cp, f->rx_amps_cp, EsNo,
+              ofdm->mean_amp, cp_codeword, &cp_pcc, &cp_iter, dd_post);
+          if (cp_class == 0)
+            dd_consider(f, &dd_best, (complex float *)f->rx_syms_cp,
+                        f->rx_amps_cp, ofdm->mean_amp, DD_W_ALT, cp_pcc);
+          if (cp_class != 0) {
+            memcpy(f->rx_payload_bits, cp_codeword, Ndatabitsperpacket);
+            crc_class = cp_class;
+            crc_ok = 1;
+            parityCheckCount = cp_pcc;
+            iter = cp_iter;
+            f->rx_decode_path = 3;
+          }
+        }
+        /* The burst demodulated a second time, with the FFT window and the
+         * frame grid following the paths found in the pilot rows
+         * (docs/improvements/26): on a channel whose delay spread is near or
+         * beyond the cyclic prefix the stock window sits at the head of one
+         * path's prefix and its timing tracker loses the burst when that path
+         * fades.  Last, only on failure, so it can only add frames; it must
+         * run here, before ofdm_sync_state_machine() zeroes the samples at
+         * the end of a burst.  The replay chain has its own soft-bit scale
+         * (mean_amp), which the LDPC decoder is very sensitive to. */
+        if (!crc_ok && ofdm->profile_track && f->rx_syms_pt != NULL) {
+          float pt_mean_amp = 0.0f;
+          if (ofdm_profile_replay(ofdm, (complex float *)f->rx_syms_pt,
+                                  f->rx_amps_pt, &pt_mean_amp)) {
+            uint8_t pt_codeword[codeword_len];
+            int pt_pcc = 0, pt_iter = 0;
+            int pt_class = decode_packet_from_syms(
+                f, (complex float *)f->rx_syms_pt, f->rx_amps_pt, EsNo,
+                pt_mean_amp, pt_codeword, &pt_pcc, &pt_iter, dd_post);
+            if (pt_class == 0)
+              dd_consider(f, &dd_best, (complex float *)f->rx_syms_pt,
+                          f->rx_amps_pt, pt_mean_amp, DD_W_ALT, pt_pcc);
+            if (pt_class != 0) {
+              memcpy(f->rx_payload_bits, pt_codeword, Ndatabitsperpacket);
+              crc_class = pt_class;
+              crc_ok = 1;
+              parityCheckCount = pt_pcc;
+              iter = pt_iter;
+              f->rx_decode_path = 4;
+            }
+          }
+        }
+        /* Decision-directed attempt (docs/improvements/20): every attempt
+         * above failed, but the best of them left the decoder's belief about
+         * each bit.  Those beliefs, as soft symbols, join the pilots as
+         * channel references; the symbols are corrected again and decoded,
+         * up to DD_ROUNDS times while the count of satisfied checks rises.
+         * Each decode starts from fresh channel soft bits: only the channel
+         * estimate carries over, so the loop cannot confirm its own errors.
+         * Last, only on failure; same parity gate and CRC. */
+        if (!crc_ok && f->dd_enable && dd_best.pcc >= 0) {
+          uint8_t dd_codeword[codeword_len];
+          int prev_pcc = dd_best.pcc;
+          for (int round = 0; round < DD_ROUNDS; round++) {
+            int dd_pcc = 0, dd_iter = 0;
+            dd_refine(f, &dd_best, f->dd_post_best);
+            int dd_class = decode_packet_from_syms(
+                f, (complex float *)f->dd_syms, f->dd_amps, EsNo,
+                dd_best.mean_amp, dd_codeword, &dd_pcc, &dd_iter, f->dd_post);
+            if (dd_class != 0) {
+              memcpy(f->rx_payload_bits, dd_codeword, Ndatabitsperpacket);
+              crc_class = dd_class;
+              crc_ok = 1;
+              parityCheckCount = dd_pcc;
+              iter = dd_iter;
+              f->rx_decode_path = 6;
+              break;
+            }
+            if (dd_pcc <= prev_pcc) break;
+            prev_pcc = dd_pcc;
+            memcpy(f->dd_post_best, f->dd_post,
+                   sizeof(float) * (size_t)Npayloadbitsperpacket);
           }
         }
         if (!crc_ok && f->verbose) {
@@ -711,6 +1115,10 @@ int freedv_comp_short_rx_ofdm(struct freedv *f, void *demod_in_8kHz,
           for (int bi = 0; bi < n; bi++) fprintf(stderr, " %02x", rx_bytes[bi]);
           fprintf(stderr, "\n");
         }
+        f->rx_last_pcc = parityCheckCount;
+        f->rx_last_npc = ldpc->NumberParityBits;
+        f->rx_last_iter = iter;
+        f->rx_last_ok = crc_ok;
         // we need a valid CRC to declare a data packet valid
         f->rx_crc_seeded = crc_class == 2;
         if (crc_ok)

@@ -26,7 +26,7 @@ ifeq ($(OS),Windows_NT)
 LDFLAGS += -lws2_32
 endif
 
- OUT = broadcast_test broadcast_diag_tx broadcast_diag_rx watterson_test acquire_vs_decode acq_tuning_sweep qam16_papr_sweep resync_gap_probe burst_train_probe
+ OUT = broadcast_test broadcast_diag_tx broadcast_diag_rx watterson_test acquire_vs_decode rx_bench chanstats_bench rx_replay rx_prefilter acq_tuning_sweep qam16_papr_sweep resync_gap_probe burst_train_probe
 
 # CPU-cost instruments.  Linux/macOS only: they time with
 # clock_gettime(CLOCK_PROCESS_CPUTIME_ID), which mingw-w64 does not provide
@@ -76,6 +76,24 @@ run: broadcast_test
 # Watterson channel so its numbers are comparable with other instruments'.
 acquire_vs_decode: acquire_vs_decode.c bench_common.c chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/freedv/libfreedvdata.a
 	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
+
+# Several receiver variants on the same samples (docs/improvements/00-bench.md).
+rx_bench: rx_bench.c bench_common.c chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/rx_blanker.c ../modem/rx_notch.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
+
+# What the channel statistics read on known channels (docs/improvements/10).
+chanstats_bench: chanstats_bench.c bench_common.c chanutil.c ../common/watterson.c ../common/mercury_prng.c ../modem/chan_classify.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
+
+# The same comparison on a recording of what a station received
+# (MERCURY_RX_DUMP): every variant decodes the same samples.
+rx_replay: rx_replay.c bench_common.c ../modem/rx_blanker.c ../modem/rx_notch.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
+
+# The receive thread's carrier notch and impulse blanker applied to a raw
+# file, for tools that decode from one (the MFSK floor with mfsk_burst_file).
+rx_prefilter: rx_prefilter.c ../modem/rx_blanker.c ../modem/rx_notch.c
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
 
 # Sweeps the acquisition knobs (timing_mx_thresh, bad_uw_errors) around the
 # ofdm_mode.c defaults and reports acq/del per SNR with a noise-only
@@ -164,6 +182,20 @@ mfsk_burst_file: mfsk_burst_file.c ../modem/modem_mfsk.c $(MFSK_DSP_SRC) ../mode
 
 mfsk_puncture_sweep: mfsk_puncture_sweep.c ../modem/mfsk/mfsk_ldpc.c ../modem/mfsk/mfsk_ldpc_8_16.c
 	$(CC) $(CFLAGS) -I../modem -I../modem/mfsk -o $@ $(filter %.c %.a %.o,$^) -lm
+
+# How much of a codeword does a frame need at each noise level, and what would
+# sending the redundancy in instalments save?  The codes and the decoder of the
+# OFDM modes, nothing else of the modem (docs/improvements/TRANSMIT-SIDE-RESEARCH.md).
+# Built on demand, like mfsk_puncture_sweep: `make -C utils ldpc_ir_sweep`.
+ldpc_ir_sweep: ldpc_ir_sweep.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -O2 -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
+
+# How far below the noise can a constant-envelope, very-large-alphabet
+# waveform go on the HF channel: M-FSK against chirps (with a noncoherent
+# RAKE), the modem's LDPC codes, the project's Watterson model
+# (docs/improvements/BELOW-NOISE-RESEARCH.md).  Built on demand.
+deep_floor_sim: deep_floor_sim.c ../common/watterson.c ../common/mercury_prng.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -O2 -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
 # Broadcast a file to Mercury, or receive one, over the broadcast TCP/KISS port.
 BCAST_RQ_SRC = $(wildcard ../datalink_broadcast/raptorq/lib/*.c) \
                $(wildcard ../datalink_broadcast/raptorq/deps/obl/*.c)

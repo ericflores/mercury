@@ -93,6 +93,16 @@ log_max_mb = 20
 ; FreeDV modem verbosity level, 0 to 3 (default: 0)
 freedv_verbosity = 0
 
+; Channel telemetry (issue #10): one "chanstats:" line in the log file (-L)
+; for every OFDM frame the receiver finishes, decoded or not: mode, CRC ok,
+; which decode attempt delivered it, SNR estimate, frequency offset, parity
+; checks satisfied, decoder iterations, and the noisiest carrier (how far
+; over the median carrier, and its audio frequency: a carrier or a narrow
+; signal sitting on the frequency shows there).  It changes nothing in what
+; is decoded.  true or false (default false).  MERCURY_CHANSTATS=1 overrides
+; it.
+chanstats = false
+
 [ptt]
 
 ; PTT backend: none, hamlib, serial, cm108, or hermes_shm (default: none).
@@ -148,6 +158,125 @@ hamlib_log_level = 0
 ; int32 PCM ceiling so any value clips cleanly.
 ; Range: -20.0 .. +20.0 (values outside are clamped).
 tx_gain_db = 0.0
+
+; A second decode attempt for OFDM frames whose first decode failed, from a
+; channel estimate averaged over more pilots (issue #9).  Receiver only: it
+; works with any peer.  off (default), auto (chosen per mode), or t4, t4f3,
+; t4f5.  On the bench it is worth about 1 dB at each mode's threshold on a
+; noise-limited channel and nothing on disturbed NVIS
+; (docs/CHANNEL-ESTIMATION-FINDINGS.md).  Not yet tried on the air.
+rx_chanest = off
+
+; One more decode attempt for OFDM frames that every other attempt failed,
+; from the signal with the cyclic prefix put to use: each prefix sample is
+; averaged with its copy one symbol length away, which lowers the noise in
+; every carrier (issue #19).  Receiver only: it works with any peer.  The
+; value is the guard in samples (8000 per second) at the start of the prefix
+; that is left out because it may hold echoes of the previous symbol: 0 off
+; (default), 4 for a clean channel, 20 for a spread one; at most 48.  On the
+; bench it is worth about half a dB beyond rx_chanest on a noise-limited
+; channel (docs/CP-RECYCLING-FINDINGS.md).  Bench-measured only; not yet tried
+; on the air.  MERCURY_CP_RECYCLE=<samples> overrides it.
+rx_cp_recycle = 0
+
+; One more decode attempt for OFDM frames that every other attempt failed, for
+; channels whose delay spread is near or beyond the cyclic prefix (disturbed
+; NVIS: two paths 7 ms apart against a 6 ms prefix; issue #26).  The burst is
+; demodulated a second time from the samples the receiver still holds, with
+; the FFT window and the frame grid following the paths found in the pilot
+; rows instead of the stock timing tracker, which loses the burst when its
+; path fades.  Receiver only: it works with any peer.  Modes with fewer than
+; 9 carriers ignore it.  true or false (default false).  Bench-measured only
+; (docs/PROFILE-TRACKING-FINDINGS.md); not yet tried on the air.  Costs one
+; more LDPC decode on a frame that failed.  MERCURY_PROFILE_TRACK=1 overrides
+; it.
+rx_profile_track = false
+
+; One more decode attempt for OFDM frames hit by narrowband interference: a CW
+; carrier, an FSK signal, another station on part of the passband (issue #7).
+; The receiver keeps a per-carrier noise profile from the pilots of every
+; burst; when a frame fails and the profile shows carriers with at least twice
+; the noise of the median carrier, the frame is decoded once more with those
+; carriers' soft bits scaled down.  Receiver only: it works with any peer.
+; With a flat profile it does nothing and costs nothing.  true or false
+; (default false).  Bench-measured only (docs/NOISE-WEIGHT-FINDINGS.md); not
+; yet tried on the air.  Costs one more LDPC decode on a frame that failed
+; while a carrier stood out.  MERCURY_NOISE_WEIGHT=1 overrides it.
+rx_noise_weight = false
+
+; Impulse blanker on the received audio, before every decoder (issue #8): for
+; short, strong noise bursts (ignition, switching supplies, electric fences,
+; static clicks), which spread over every carrier of the symbols they land in.
+; A sample more than this many times the tracked level of the audio is zeroed,
+; with what follows it, unless the rise lasts (a burst arriving, a long
+; crash).  0 = off (default); 8 is the recommended value; 6 costs the top
+; rung a few frames under fading and 4 cuts every mode's own peaks.  Receiver only.  The audio reaches the
+; decoders 8 ms later when it is on.  Bench-measured only
+; (docs/BLANKER-FINDINGS.md); not yet tried on the air: real static arrives
+; shaped by the radio's filter and AGC.  Use fast or no AGC on the radio for
+; data.  MERCURY_BLANKER=<k> overrides it.
+rx_blanker = 0
+
+; Automatic notch for steady carriers in the received audio, before every
+; decoder (issue #7): a broadcast heterodyne, a birdie, someone tuning up on
+; the frequency.  A carrier inside the passband captures the demodulator's
+; frequency tracking, and above about the signal's own level it stops
+; acquisition altogether; this finds any line that stays on one frequency for
+; a second, measures it to a fraction of a hertz and removes it with a 6 Hz
+; notch, up to four at a time, releasing each two seconds after it is gone.
+; Receiver only; for every mode, control frames and the MFSK floor included.
+; true or false (default false).  Bench-measured only
+; (docs/NOISE-WEIGHT-FINDINGS.md); not yet tried on the air.  It also removes
+; a peer's ATU tuning carrier (TUNE), which nothing decodes.  MERCURY_NOTCH=1
+; overrides it.
+rx_notch = false
+
+; Abandon an LDPC decode that is going nowhere (issue #23).  A frame that
+; fails spends the decoder's full 100 iterations finding that out (about
+; 100 ms for DATAC1 and 230 ms for QAM16C2 on a desktop core, several times
+; that on a Raspberry Pi), and each optional decode attempt above pays it
+; again.  With this on, a decode whose count of satisfied parity checks has
+; not improved for 10 iterations and sits below 80 % is stopped (on the long
+; codes of DATAC1, DATAC17 and QAM16C2 only: on the short ones the rule lost
+; frames).  It makes
+; the receiver cheaper, not better: use it with the attempts above on a slow
+; machine.  true or false (default false).  Bench-measured only
+; (docs/RX-EFFORT-FINDINGS.md).  OFDM modes only; the MFSK floor has its own
+; decoder.  MERCURY_RX_EARLY_STOP=1 overrides it.
+rx_early_stop = false
+
+; One more decode attempt for OFDM frames that every other attempt failed
+; (issue #20).  The receiver's channel estimate rests on 2 pilot symbols per
+; carrier and frame; here the decoder's own belief about the 4 data symbols
+; between them, weighted by how sure it is of each, is added to the pilots,
+; the channel is estimated again and the frame decoded again, up to twice.
+; Receiver only: it works with any peer.  true or false (default false).
+; Bench-measured only (docs/DECISION-DIRECTED-FINDINGS.md); not yet tried on
+; the air.  Costs up to two more LDPC decodes on a frame that failed.
+; MERCURY_DD=1 overrides it.
+rx_decision_directed = false
+
+; For a trial: every receiver-only improvement above on at once, at its
+; recommended setting (rx_chanest auto, rx_cp_recycle 4, rx_profile_track,
+; rx_noise_weight, rx_decision_directed, rx_notch, rx_blanker 8,
+; rx_early_stop).  All of them are receiver-side: the station works with any
+; peer, and nothing it transmits changes.  Each key above can still switch
+; its feature on without this one, and a feature's environment variable set
+; to 0 switches that feature off even with this on.  true or false (default
+; false).  MERCURY_RX_ALL=1 overrides it.
+rx_improvements = false
+
+; Clip the top rung (QAM16C2) on transmit (issue #2).  It is the only OFDM
+; mode sent unclipped: its peaks are 11.6 dB over its average power, against
+; about 7 dB for the rung below, so a transmitter set by its peaks (every SSB
+; radio) radiates 4-5 dB less average power on it and the rung is reached
+; later than it could be.  true applies the one setting that was measured
+; (drive 2.0, gain 1.0): same peak, 4.9 dB more average power.  Transmit side
+; only: any Mercury receiver decodes it, clipped or not.  true or false
+; (default false).  Bench-measured (docs/CLIPPED-QAM16C2-FINDINGS.md); what a
+; real transmitter's ALC and final do to it has not been tried on the air.
+; MERCURY_QAM16C2_CLIP=1 overrides it.
+qam16c2_tx_clip = false
 
 ; TX keying delay in milliseconds (default: 10), waited after PTT ON before
 ; audio is written to the playback device on TX. The default covers the

@@ -39,12 +39,19 @@ struct LDPC {
   int protection_mode;
   int data_bits_per_frame;
   int coded_bits_per_frame;
+
+  /* Mercury (docs/improvements/23): stop a decode that is going nowhere.
+   * 0 = run to max_iter as always (the default; the code table leaves it
+   * zero).  See SumProductStall() in mpdecode_core.c for the rule. */
+  int early_stop;
 };
 
 void encode(struct LDPC *ldpc, unsigned char ibits[], unsigned char pbits[]);
 
 int run_ldpc_decoder(struct LDPC *ldpc, uint8_t out_char[], float input[],
                      int *parityCheckCount);
+int run_ldpc_decoder_post(struct LDPC *ldpc, uint8_t out_char[], float input[],
+                          int *parityCheckCount, float *posterior);
 
 void sd_to_llr(float llr[], float sd[], int n);
 void Demod2D(float symbol_likelihood[], COMP r[], COMP S_matrix[], int M,
@@ -53,6 +60,7 @@ void Somap(float bit_likelihood[], float symbol_likelihood[], int M, int bps,
            int number_symbols);
 void symbols_to_llrs(float llr[], COMP rx_qpsk_symbols[], float rx_amps[],
                      float EsNo, float mean_amp, int bps, int nsyms);
+void llrs_to_soft_symbols(COMP sym[], const float llr[], int bps, int nsyms);
 void fsk_rx_filt_to_llrs(float llr[], float rx_filt[], float v_est,
                          float SNRest, int M, int nsyms);
 

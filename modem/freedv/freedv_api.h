@@ -275,6 +275,99 @@ void freedv_set_acq_fft_enable(struct freedv *freedv, bool val);
  * changes acquisition behaviour only, not the on-air frame format.  The
  * getters report the LIVE values, so a tool can print what it actually
  * measured with instead of restating ofdm_mode.c. */
+/* Alternative channel estimate for the OFDM data modes (OFDM_CHANEST_* in
+ * codec2_ofdm.h; 0 = off, the default).  When on, a packet whose stock
+ * decode fails its CRC is decoded once more from an estimate averaged over
+ * more pilots.  The stock decode is untouched, so nothing that decodes
+ * today is lost.  freedv_get_rx_decode_path: which attempt delivered the
+ * last frame (0 stock, 1 HARQ combine, 2 alternative estimate, 3 alternative
+ * estimate on recycled cyclic-prefix samples, 4 profile-tracked replay). */
+void freedv_set_chanest_alt(struct freedv *freedv, int mode);
+int freedv_get_chanest_alt(struct freedv *freedv);
+/* Cyclic-prefix recycling for the OFDM data modes: one more decode attempt,
+ * after the others, from rows whose prefix samples were averaged with their
+ * twins one symbol length away.  guard_samples is the length at the head of
+ * the prefix left out as possibly holding echoes of the previous symbol (4
+ * for a clean channel, 20 for a spread one).  0 = off (the default); a
+ * negative value or one longer than the prefix also means off.
+ * docs/improvements/19-cp-recycling.md. */
+void freedv_set_cp_recycle(struct freedv *freedv, int guard_samples);
+int freedv_get_cp_recycle(struct freedv *freedv);
+/* Window placement from the pilots' delay profile, for the OFDM data modes
+ * with at least 9 carriers: when every earlier attempt has failed a packet,
+ * the burst is demodulated once more from the samples still held, with the
+ * FFT window and the frame grid following the paths found in the pilot rows,
+ * and decoded from that (decode path 4).  For channels whose delay spread is
+ * near or beyond the cyclic prefix.  0 = off (the default); modes with fewer
+ * carriers stay off.  docs/improvements/26-window-placement.md. */
+void freedv_set_profile_track(struct freedv *freedv, int on);
+int freedv_get_profile_track(struct freedv *freedv);
+/* What the receiver knows about the packet it has just finished, decoded or
+ * not, for telemetry (docs/improvements/10-channel-telemetry.md).  Valid
+ * after a freedv_rawdatarx() call whose rx status has FREEDV_RX_BITS or
+ * FREEDV_RX_BIT_ERRORS.  The noise fields need freedv_set_noise_stats() (or
+ * the noise weights) on; without it they are zero. */
+struct freedv_rx_frame_stats {
+  int ok;              /* CRC passed */
+  int path;            /* decode attempt that delivered it (see
+                          freedv_get_rx_decode_path) */
+  int pcc, npc;        /* parity checks satisfied by the decode kept, of npc */
+  int iters;           /* its LDPC iterations */
+  float snr_db;        /* the modem's SNR estimate */
+  float foff_hz;       /* tracked frequency offset */
+  int noise_flagged;   /* carriers the noise weights singled out (0 if off) */
+  float noise_peak_db; /* noisiest carrier over the median carrier, dB */
+  float noise_peak_hz; /* that carrier's audio frequency */
+  /* From the pilot rows and the data symbols of the burst so far; coarse
+   * (docs/CHANSTATS-FINDINGS.md).  chan_valid: 1 = dopp_hz, 2 = dly_ms,
+   * 4 = evm_db, evm_excess_db, evm_resid_db could be formed; a field not valid
+   * is 0.  evm_floor_db is the EVM the mode's stock transmitter leaves on a
+   * perfect channel (its Hilbert clipper), measured on AWGN at 40 dB
+   * (docs/CHANSTATS-FINDINGS.md); -100 where none was measured or none is
+   * there. */
+  float dopp_hz;       /* Doppler spread (2 sigma); saturates near 9 Hz */
+  float dly_ms;        /* delay spread, as the separation of two equal paths */
+  float evm_db;        /* error of the equalised data symbols, dB under power */
+  float evm_excess_db; /* evm_db over what the pilot noise alone predicts */
+  float evm_noise_db;  /* the EVM the pilot noise alone predicts */
+  float evm_floor_db;  /* the mode's own transmitter floor (stock clipper) */
+  float evm_resid_db;  /* evm_db over the noise and that floor together */
+  float cp_ms;         /* the mode's cyclic prefix */
+  int chan_valid;
+};
+int freedv_get_rx_frame_stats(struct freedv *freedv,
+                              struct freedv_rx_frame_stats *st);
+/* Keep the per-carrier noise profile for telemetry without the weighted
+ * decode attempt (freedv_set_noise_weight keeps it too). */
+void freedv_set_noise_stats(struct freedv *freedv, int on);
+/* Decision-directed channel estimation for the OFDM data modes: when every
+ * other attempt has failed a packet, the decoder's own posterior soft bits
+ * from the best failed attempt become soft symbols, and those, weighted by
+ * how sure the decoder is of each, join the pilots as channel references for
+ * a new estimate and one more decode (decode path 6), up to two rounds.  The
+ * stock estimate rests on 2 pilots per carrier and frame; this one on those
+ * and 4 data symbols.  0 = off (the default).
+ * docs/improvements/20-decision-directed.md. */
+void freedv_set_decision_directed(struct freedv *freedv, int on);
+int freedv_get_decision_directed(struct freedv *freedv);
+/* Stop an LDPC decode that is going nowhere: once the count of satisfied
+ * parity checks has not improved for 10 iterations and sits below 97 %, the
+ * decode is abandoned instead of running to its 100-iteration limit.  That
+ * limit is where the time of a frame that fails goes, and every optional
+ * decode attempt pays it again.  0 = off (the default).
+ * docs/improvements/23-rx-effort.md. */
+void freedv_set_ldpc_early_stop(struct freedv *freedv, int on);
+int freedv_get_ldpc_early_stop(struct freedv *freedv);
+/* Noise-aware soft bits for the OFDM data modes: a per-carrier noise profile
+ * is kept from the pilots of each burst; when a packet fails and the profile
+ * singles out carriers (a CW carrier, an FSK signal on part of the band), it
+ * is decoded once more with those carriers' soft bits scaled down (decode
+ * path 5).  0 = off (the default).  docs/improvements/07-noise-aware-llr.md.
+ * freedv_get_noise_profile() is for tests and telemetry. */
+void freedv_set_noise_weight(struct freedv *freedv, int on);
+int freedv_get_noise_weight(struct freedv *freedv);
+int freedv_get_noise_profile(struct freedv *freedv, float *per_carrier, int max);
+int freedv_get_rx_decode_path(struct freedv *freedv);
 void freedv_set_timing_mx_thresh(struct freedv *freedv, float val);
 void freedv_set_bad_uw_errors(struct freedv *freedv, int val);
 float freedv_get_timing_mx_thresh(struct freedv *freedv);
@@ -300,6 +393,13 @@ void freedv_set_freq_search_fine(struct freedv *freedv, float hz);
  * utils/qam16_papr_sweep.c. */
 void freedv_set_tx_clip_config(struct freedv *freedv, bool clip_en,
                                float gain1, float gain2, float amp_scale);
+/* QAM16C2 transmit clipping at the measured setting (drive 2.0, gain 1.0):
+ * PAPR 11.4 -> 6.7 dB, so a peak-limited transmitter radiates about 4.7 dB
+ * more average power on the top rung.  Transmit side only: any receiver
+ * decodes it.  0 = off (the default, the mode as it has always been sent).
+ * Returns 1 for a QAM16C2 instance, 0 (and does nothing) for any other.
+ * docs/CLIPPED-QAM16C2-FINDINGS.md, docs/improvements/02-qam16c2-tx-clip.md. */
+int freedv_set_qam16c2_tx_clip(struct freedv *freedv, int on);
 void freedv_pack(unsigned char *bytes, unsigned char *bits, int nbits);
 void freedv_unpack(unsigned char *bits, unsigned char *bytes, int nbits);
 unsigned short freedv_crc16_unpacked(unsigned char *bits, int nbits);

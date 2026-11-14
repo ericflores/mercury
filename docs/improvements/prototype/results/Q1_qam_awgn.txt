@@ -1,0 +1,5 @@
+QAM16C2 1215 B, burst 3.30 s, chan AWGN, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+SNR3k    meas               c0           c5           c6           c7           c9   (acquired/delivered per 50)
+   +7.0    +7.00      50/0         50/0         50/17        50/50        50/50      any  50
+   +8.0    +8.00      50/31        50/49        50/50        50/50        50/50      any  50
+   +9.0    +9.00      50/50        50/50        50/50        50/50        50/50      any  50

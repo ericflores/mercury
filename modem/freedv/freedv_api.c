@@ -199,6 +199,16 @@ void freedv_close(struct freedv *freedv) {
   FREE(freedv->tx_payload_bits);
   FREE(freedv->rx_payload_bits);
   FREE(freedv->harq_llr);
+  FREE(freedv->rx_syms_alt);
+  FREE(freedv->rx_amps_alt);
+  FREE(freedv->rx_syms_cp);
+  FREE(freedv->rx_amps_cp);
+  FREE(freedv->rx_syms_pt);
+  FREE(freedv->dd_post);
+  FREE(freedv->dd_post_best);
+  FREE(freedv->dd_syms);
+  FREE(freedv->dd_amps);
+  FREE(freedv->rx_amps_pt);
   if (freedv->codec2) codec2_destroy(freedv->codec2);
 
   if (FDV_MODE_ACTIVE(FREEDV_MODE_1600, freedv->mode)) {
@@ -1723,6 +1733,220 @@ void freedv_set_acq_fft_enable(struct freedv *f, bool val) {
   if (f != NULL && f->ofdm != NULL) ofdm_set_acq_fft_enable(f->ofdm, val);
 }
 
+void freedv_set_chanest_alt(struct freedv *f, int mode) {
+  if (f != NULL && f->ofdm != NULL && f->rx_syms_alt != NULL)
+    ofdm_set_chanest_alt(f->ofdm, mode);
+}
+
+int freedv_get_chanest_alt(struct freedv *f) {
+  return (f != NULL && f->ofdm != NULL) ? ofdm_get_chanest_alt(f->ofdm) : 0;
+}
+
+void freedv_set_cp_recycle(struct freedv *f, int guard_samples) {
+  if (f != NULL && f->ofdm != NULL && f->rx_syms_cp != NULL)
+    ofdm_set_cp_recycle(f->ofdm, guard_samples);
+}
+
+int freedv_get_cp_recycle(struct freedv *f) {
+  return (f != NULL && f->ofdm != NULL) ? ofdm_get_cp_recycle(f->ofdm) : 0;
+}
+
+/* Window placement from the pilots' delay profile
+ * (docs/improvements/26-window-placement.md).  Switching it on allocates the
+ * packet buffers of the attempt; modes with fewer than 9 carriers refuse. */
+void freedv_set_profile_track(struct freedv *f, int on) {
+  if (f == NULL || f->ofdm == NULL) return;
+  if (on && f->rx_syms_pt == NULL) {
+    int nsyms = ofdm_get_bits_per_packet(f->ofdm) / f->ofdm->bps;
+    f->rx_syms_pt = (COMP *)CALLOC((size_t)nsyms, sizeof(COMP));
+    f->rx_amps_pt = (float *)CALLOC((size_t)nsyms, sizeof(float));
+    if (f->rx_syms_pt == NULL || f->rx_amps_pt == NULL) {
+      FREE(f->rx_syms_pt);
+      FREE(f->rx_amps_pt);
+      f->rx_syms_pt = NULL;
+      f->rx_amps_pt = NULL;
+      return;
+    }
+  }
+  ofdm_set_profile_track(f->ofdm, on);
+}
+
+int freedv_get_profile_track(struct freedv *f) {
+  return (f != NULL && f->ofdm != NULL) ? ofdm_get_profile_track(f->ofdm) : 0;
+}
+
+void freedv_set_noise_stats(struct freedv *f, int on) {
+  if (f != NULL && f->ofdm != NULL) ofdm_set_noise_stats(f->ofdm, on);
+}
+
+/* The error vector magnitude a mode's stock transmitter leaves on a perfect
+ * channel, dB under the symbol power: its Hilbert clipper.  Measured with
+ * utils/chanstats_bench on AWGN at 40 dB SNR3k, 6 bursts (clipper off: the
+ * floor goes away and evm_excess reads 0 to 0.4 dB from 10 to 30 dB).  A
+ * receiver that does not know it reads every clean DATAC1 frame above 12 dB
+ * as "distorted at the transmitter". */
+static float freedv_evm_floor_db(int mode) {
+  switch (mode) {
+    case FREEDV_MODE_DATAC1: return -12.9f;
+    case FREEDV_MODE_DATAC3: return -14.0f;
+    case FREEDV_MODE_DATAC4: return -22.5f;
+    case FREEDV_MODE_DATAC17: return -10.0f;
+    case FREEDV_MODE_QAM16C2: return -35.0f; /* no clipper: the bench's own floor */
+    default: return -100.0f;
+  }
+}
+
+/* Telemetry for the packet just finished
+ * (docs/improvements/10-channel-telemetry.md).  Returns 0 for a mode that is
+ * not an OFDM data mode. */
+int freedv_get_rx_frame_stats(struct freedv *f,
+                              struct freedv_rx_frame_stats *st) {
+  if (f == NULL || f->ofdm == NULL || f->ldpc == NULL || st == NULL) return 0;
+  struct OFDM *ofdm = f->ofdm;
+  memset(st, 0, sizeof(*st));
+  st->evm_floor_db = -100.0f;
+  st->ok = f->rx_last_ok;
+  st->path = f->rx_decode_path;
+  st->pcc = f->rx_last_pcc;
+  st->npc = f->rx_last_npc;
+  st->iters = f->rx_last_iter;
+  st->snr_db = f->snr_est;
+  st->foff_hz = ofdm->foff_est_hz;
+  st->noise_flagged = f->rx_noise_flagged;
+  st->cp_ms = 1000.0f * ofdm->tcp;
+  float v[ofdm->nc];
+  if (ofdm_noise_profile_get(ofdm, v)) {
+    float srt[ofdm->nc];
+    int nc = ofdm->nc, arg = 0;
+    for (int c = 0; c < nc; c++) {
+      srt[c] = v[c];
+      if (v[c] > v[arg]) arg = c;
+    }
+    for (int a = 1; a < nc; a++)
+      for (int b = a; b > 0 && srt[b] < srt[b - 1]; b--) {
+        float t = srt[b];
+        srt[b] = srt[b - 1];
+        srt[b - 1] = t;
+      }
+    float med = srt[(nc - 1) / 2];
+    if (med > 0.0f) st->noise_peak_db = 10.0f * log10f(v[arg] / med);
+    /* carriers are one symbol rate apart, centred on rx_centre */
+    st->noise_peak_hz = ofdm->rx_centre + ((float)arg - 0.5f * (float)(nc - 1)) * ofdm->rs;
+  }
+  /* Spreads and EVM (same switch as the profile). */
+  if ((ofdm->noise_weight || ofdm->nv_stats) && !ofdm->pt_replay) {
+    const struct ofdm_chan_acc *a = &ofdm->chan_acc;
+    struct ofdm_chan_est ce;
+    float row_dt = (float)ofdm->ns * (ofdm->ts + ofdm->tcp);
+    if (ofdm_chan_acc_result(a, ofdm->nc, row_dt, ofdm->rs, &ce)) {
+      if (ce.ok_time) {
+        st->dopp_hz = ce.dopp_hz;
+        st->chan_valid |= 1;
+      }
+      if (ce.ok_freq) {
+        st->dly_ms = ce.dly_ms;
+        st->chan_valid |= 2;
+      }
+    }
+    if (a->nev > 0 && ofdm->nv_dn > 0 && ofdm->nv_n > 0 && ce.pilot_pwr > 0.0f) {
+      float err = 0.0f, vt = 0.0f;
+      for (int c = 1; c <= ofdm->nc; c++) {
+        err += ofdm->nv_data[c];
+        vt += ofdm->nv_carrier[c];
+      }
+      err /= (float)ofdm->nv_dn * (float)ofdm->nc;
+      vt /= (float)ofdm->nv_n * (float)ofdm->nc;
+      float pd = a->ev / (float)a->nev;
+      /* Noise: the smaller of the two second-difference estimates, each
+       * inflated by the selectivity of its own axis. */
+      float v = vt;
+      if (ce.ok_freq && ce.noise_f > 0.0f && ce.noise_f < v) v = ce.noise_f;
+      /* What the noise alone does to a decided symbol: its own variance, and
+       * the error of the two-pilot reference it is judged against (the
+       * average of two pilots has variance v/2: v/4 on the phase, scaled
+       * to the symbol, and v/4 on the amplitude it is decided at). */
+      float pred = v * (1.0f + 0.5f * pd / ce.pilot_pwr);
+      if (err > 0.0f && pd > 0.0f && pred > 0.0f) {
+        st->evm_db = 10.0f * log10f(err / pd);
+        st->evm_excess_db = 10.0f * log10f(err / pred);
+        st->evm_noise_db = 10.0f * log10f(pred / pd);
+        st->evm_floor_db = freedv_evm_floor_db(f->mode);
+        st->evm_resid_db =
+            10.0f * log10f(err / (pred + powf(10.0f, 0.1f * st->evm_floor_db) * pd));
+        st->chan_valid |= 4;
+      }
+    }
+  }
+  return 1;
+}
+
+/* Decision-directed channel estimation
+ * (docs/improvements/20-decision-directed.md).  Switching it on allocates
+ * the attempt's buffers. */
+void freedv_set_decision_directed(struct freedv *f, int on) {
+  if (f == NULL || f->ofdm == NULL || f->ldpc == NULL) return;
+  if (on && f->dd_syms == NULL) {
+    int nbits = ofdm_get_bits_per_packet(f->ofdm);
+    int nsyms = nbits / f->ofdm->bps;
+    f->dd_post = (float *)CALLOC((size_t)nbits, sizeof(float));
+    f->dd_post_best = (float *)CALLOC((size_t)nbits, sizeof(float));
+    f->dd_syms = (COMP *)CALLOC((size_t)nsyms, sizeof(COMP));
+    f->dd_amps = (float *)CALLOC((size_t)nsyms, sizeof(float));
+    if (!f->dd_post || !f->dd_post_best || !f->dd_syms || !f->dd_amps) {
+      FREE(f->dd_post);
+      FREE(f->dd_post_best);
+      FREE(f->dd_syms);
+      FREE(f->dd_amps);
+      f->dd_post = f->dd_post_best = f->dd_amps = NULL;
+      f->dd_syms = NULL;
+      return;
+    }
+  }
+  f->dd_enable = on && f->dd_syms != NULL;
+}
+
+int freedv_get_decision_directed(struct freedv *f) {
+  return f != NULL ? f->dd_enable : 0;
+}
+
+/* Early termination of LDPC decodes that are going nowhere
+ * (docs/improvements/23-rx-effort.md).  Applies to every decode of this
+ * instance: the stock attempt and each fallback. */
+void freedv_set_ldpc_early_stop(struct freedv *f, int on) {
+  if (f != NULL && f->ldpc != NULL) f->ldpc->early_stop = on ? 1 : 0;
+}
+
+int freedv_get_ldpc_early_stop(struct freedv *f) {
+  return (f != NULL && f->ldpc != NULL) ? f->ldpc->early_stop : 0;
+}
+
+/* Noise-aware soft bits (docs/improvements/07-noise-aware-llr.md): keep a
+ * per-carrier noise profile from the pilots and, when a packet fails and the
+ * profile singles out carriers, decode it once more with those carriers
+ * scaled down (decode path 5). */
+void freedv_set_noise_weight(struct freedv *f, int on) {
+  if (f != NULL && f->ofdm != NULL) ofdm_set_noise_weight(f->ofdm, on);
+}
+
+int freedv_get_noise_weight(struct freedv *f) {
+  return (f != NULL && f->ofdm != NULL) ? ofdm_get_noise_weight(f->ofdm) : 0;
+}
+
+/* The profile of the burst in progress or just received: per carrier, the
+ * larger of the mean squared pilot residual and the mean squared distance of
+ * the data symbols to their nearest constellation point (noise plus
+ * interference, in the units of the received symbols).  Returns the number
+ * of carriers written, or 0 when the feature is off, no frame has been added
+ * yet, or max is less than the number of carriers. */
+int freedv_get_noise_profile(struct freedv *f, float *per_carrier, int max) {
+  if (f == NULL || f->ofdm == NULL || max < f->ofdm->nc) return 0;
+  return ofdm_noise_profile_get(f->ofdm, per_carrier);
+}
+
+int freedv_get_rx_decode_path(struct freedv *f) {
+  return f != NULL ? f->rx_decode_path : 0;
+}
+
 void freedv_set_timing_mx_thresh(struct freedv *f, float val) {
   if (f != NULL && f->ofdm != NULL) ofdm_set_timing_mx_thresh(f->ofdm, val);
 }
@@ -1770,4 +1994,16 @@ void freedv_set_tx_clip_config(struct freedv *f, bool clip_en, float gain1,
                                float gain2, float amp_scale) {
   if (f != NULL && f->ofdm != NULL)
     ofdm_set_tx_clip_config(f->ofdm, clip_en, gain1, gain2, amp_scale);
+}
+
+/* QAM16C2's transmit clipping at the one setting that was measured
+ * (docs/CLIPPED-QAM16C2-FINDINGS.md): drive 2.0, gain 1.0, the mode's own
+ * amplitude scale.  The two gains are not parameters: 2.5 loses under
+ * fading and 3.0 destroys the mode.  Returns 1 if f is a QAM16C2 instance
+ * (and the setting was applied), 0 otherwise: every other mode is left as
+ * it is. */
+int freedv_set_qam16c2_tx_clip(struct freedv *f, int on) {
+  if (f == NULL || f->ofdm == NULL || f->mode != FREEDV_MODE_QAM16C2) return 0;
+  ofdm_set_tx_clip_config(f->ofdm, on != 0, 2.0f, 1.0f, f->ofdm->amp_scale);
+  return 1;
 }

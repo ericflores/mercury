@@ -216,6 +216,49 @@ struct freedv {
    * the running LLR sum; harq_valid marks it occupied; the caller must call
    * freedv_harq_reset() whenever a *new* frame (not a retransmit) is expected
    * so stale soft information is not combined across different payloads. */
+  /* Second decode attempt from the alternative channel estimate
+   * (ofdm->chanest_alt): the packet's symbols and amplitudes as that
+   * estimate corrected them, kept beside rx_syms/rx_amps.  rx_decode_path
+   * says which attempt delivered the last frame: 0 stock, 1 HARQ combine,
+   * 2 alternative estimate, 3 alternative estimate on recycled
+   * prefix samples. */
+  COMP *rx_syms_alt;
+  float *rx_amps_alt;
+  /* Fourth attempt (docs/improvements/19): the same, from the rows whose
+   * cyclic-prefix samples were averaged with their twins (ofdm->cp_recycle).
+   * rx_decode_path 3 = delivered by it. */
+  COMP *rx_syms_cp;
+  float *rx_amps_cp;
+  /* Fifth attempt (docs/improvements/26): the packet demodulated a second
+   * time by the profile tracker's replay (allocated when the feature is
+   * switched on).  rx_decode_path 4 = delivered by it. */
+  COMP *rx_syms_pt;
+  float *rx_amps_pt;
+  int rx_decode_path;
+  /* Decision-directed attempt (docs/improvements/20): when every other
+   * attempt has failed, the best failed decode's posterior soft bits are
+   * turned into soft symbols and used, with the pilots, as channel
+   * references for one more estimate and decode.  The buffers are allocated
+   * when the feature is switched on: dd_post and dd_post_best hold the
+   * posterior of the attempt in hand and of the best failed one (payload
+   * bits), dd_syms/dd_amps the re-corrected packet.  rx_decode_path 6 =
+   * delivered by it. */
+  int dd_enable;
+  float *dd_post;
+  float *dd_post_best;
+  COMP *dd_syms;
+  float *dd_amps;
+  /* The last completed packet's decode, for telemetry
+   * (freedv_get_rx_frame_stats): parity checks satisfied, their number, and
+   * the iterations of the decode that was kept. */
+  int rx_last_pcc;
+  int rx_last_npc;
+  int rx_last_iter;
+  int rx_last_ok;
+  /* Noise-weighted attempt (docs/improvements/07): the number of carriers the
+   * last failed packet's noise profile singled out (0 = flat, attempt not
+   * run).  rx_decode_path 5 = delivered by it. */
+  int rx_noise_flagged;
   float *harq_llr;
   int harq_llr_nbits;
   int harq_enable;

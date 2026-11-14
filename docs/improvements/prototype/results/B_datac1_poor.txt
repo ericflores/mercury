@@ -1,0 +1,6 @@
+DATAC1 512 B, burst 4.40 s, chan CCIR 520 Poor: 2 ms, 1 Hz, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+No       meas               c0           c5           c6           c7           c9   (acquired/delivered per 100)
+  -38.0    +7.88      99/98        99/98        99/99        99/98        99/98      any  99
+  -36.0    +5.88      99/96        99/93        99/98        99/97        99/94      any  98
+  -34.0    +3.88      99/70        99/72        99/88        99/87        99/90      any  92
+  -32.0    +1.88      96/17        96/23        96/41        96/47        96/53      any  55

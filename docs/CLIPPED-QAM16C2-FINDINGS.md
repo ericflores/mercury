@@ -189,6 +189,29 @@ re-litigated here.)
   which the analytic-envelope detail differs slightly from how upstream
   quoted it).
 
+## As shipped behind a switch (2026-11-14, this fork, proposal 02)
+
+`[audio] qam16c2_tx_clip = true` or `MERCURY_QAM16C2_CLIP=1`, off by default,
+applies the verdict's setting to the pooled QAM16C2 instance when it is
+opened (`freedv_set_qam16c2_tx_clip()`: drive 2.0, gain 1.0, the mode's own
+`amp_scale`). The gains are not exposed. Measured on the burst the modem
+transmits (preamble, packet, postamble), `tests/modem/test_tx_clip.c`:
+
+| | PAPR | peak (int16) | rms | average power |
+|---|---|---|---|---|
+| off (as always sent) | 11.62 dB | 16383 | 4298 | reference |
+| on | 6.69 dB | 16384 | 7581 | +4.93 dB |
+
+The peak does not move, so a transmitter adjusted for the mode as it is sent
+today is not driven harder; the average power rises by 4.9 dB. With the
+switch off the burst is sample for sample the untouched one, and every other
+mode refuses the switch. A clipped burst decodes in a stock receiver.
+
+Not done: the delivery tables above were not re-run through the switch (the
+setting is the same call the sweep tool makes, with the same four values);
+nothing on the air; the ladder's QAM16C2 threshold is untouched (see the
+follow-up in `docs/improvements/02-qam16c2-tx-clip.md`).
+
 ## Reproducing
 
 ```sh

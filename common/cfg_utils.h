@@ -69,6 +69,17 @@
 #define CFG_KEY_DISCONNECT_DRAIN_TIMEOUT_S "arq:disconnect_drain_timeout_s"
 #define CFG_KEY_TX_GAIN_DB          "audio:tx_gain_db"
 #define CFG_KEY_TX_DELAY_MS         "audio:tx_delay_ms"
+#define CFG_KEY_RX_CHANEST          "audio:rx_chanest"
+#define CFG_KEY_RX_CP_RECYCLE       "audio:rx_cp_recycle"
+#define CFG_KEY_RX_PROFILE_TRACK    "audio:rx_profile_track"
+#define CFG_KEY_RX_NOISE_WEIGHT     "audio:rx_noise_weight"
+#define CFG_KEY_RX_BLANKER          "audio:rx_blanker"
+#define CFG_KEY_RX_NOTCH            "audio:rx_notch"
+#define CFG_KEY_RX_IMPROVEMENTS     "audio:rx_improvements"
+#define CFG_KEY_CHANSTATS           "main:chanstats"
+#define CFG_KEY_RX_EARLY_STOP       "audio:rx_early_stop"
+#define CFG_KEY_RX_DECISION_DIRECTED "audio:rx_decision_directed"
+#define CFG_KEY_QAM16C2_TX_CLIP     "audio:qam16c2_tx_clip"
 #define CFG_KEY_TNC_KEEPALIVE_S     "tnc:keepalive_s"
 #define CFG_KEY_TNC_BUFFER_REPORT_MS "tnc:buffer_report_ms"
 #define CFG_KEY_ARQ_RETRY_STAGGER_MS          "arq:retry_stagger_ms"
@@ -135,6 +146,45 @@ typedef struct {
     int      max_keydown_s;             /* ARQ: longest carousel round asked
                                          * for or sent, in s.  0 (default):
                                          * the protocol's 30 s; else 5..30.  */
+    int      rx_chanest;            /* Second decode attempt from a channel
+                                    * estimate over more pilots (issue #9):
+                                    * 0 off (default), 1 t4, 2 t4f3, 3 t4f5,
+                                    * -1 auto (by mode).  The ini value is
+                                    * the name: off, t4, t4f3, t4f5, auto. */
+    int      rx_cp_recycle;         /* One more decode attempt from rows whose
+                                    * cyclic-prefix samples are averaged with
+                                    * their twins (issue #19): the guard in
+                                    * samples, 0 off (default), else 1..48. */
+    bool     rx_profile_track;      /* One more decode attempt from the burst
+                                    * demodulated again with the FFT window
+                                    * placed from the pilots' delay profile
+                                    * (issue #26).  false (default) off. */
+    bool     rx_noise_weight;       /* One more decode attempt with the soft
+                                    * bits of carriers the pilots show to be
+                                    * interfered scaled down (issue #7).
+                                    * false (default) off. */
+    float    rx_blanker;            /* Impulse blanker threshold on the captured
+                                    * audio (issue #8): 0 off (default), else
+                                    * 1..100; 8 is the recommended value. */
+    bool     rx_notch;              /* Automatic notch for steady carriers on
+                                    * the captured audio (issue #7).  false
+                                    * (default) off. */
+    bool     rx_improvements;       /* Every receiver-only improvement on at
+                                    * its recommended setting, for a trial.
+                                    * false (default) off. */
+    bool     chanstats;             /* One telemetry line in the timing log per
+                                    * OFDM packet received (issue #10).
+                                    * false (default) off. */
+    bool     rx_decision_directed;  /* Last decode attempt from a channel
+                                    * estimate that also uses the decoder's
+                                    * belief about the data (issue #20).
+                                    * false (default) off. */
+    bool     rx_early_stop;         /* Abandon LDPC decodes that are going
+                                    * nowhere (issue #23).  false (default)
+                                    * runs every decode to its limit. */
+    bool     qam16c2_tx_clip;       /* Clip QAM16C2 on transmit at the measured
+                                    * setting (issue #2).  false (default)
+                                    * sends it as it has always been sent. */
     float    tx_gain_db;            /* Linear-equivalent gain on the modulator
                                     * TX samples, in dB. 0.0 = no change.
                                     * Range -20.0 .. +20.0 (clamped). */

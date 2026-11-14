@@ -1,0 +1,5 @@
+QAM16C2 1215 B, burst 3.30 s, chan CCIR 520 Poor: 2 ms, 1 Hz, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+No       meas               c0           c5           c6           c7           c9   (acquired/delivered per 50)
+  -48.0   +13.57      44/43        44/44        44/44        44/44        44/44      any  44
+  -46.0   +11.53      40/31        40/35        40/38        40/37        40/35      any  38
+  -44.0    +9.53      36/12        36/13        36/18        36/18        36/14      any  18

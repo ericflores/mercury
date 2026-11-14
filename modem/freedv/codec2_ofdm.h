@@ -133,6 +133,32 @@ void ofdm_set_freq_search_fine(struct OFDM *, float hz);
  * clipper requires it.  See utils/qam16_papr_sweep.c. */
 void ofdm_set_tx_clip_config(struct OFDM *, bool clip_en, float gain1,
                              float gain2, float amp_scale);
+/* Alternative channel estimate for the data modes, used by the receiver as
+ * a second decode attempt when the stock one fails its CRC.  See
+ * docs/improvements/09-channel-estimation.md. */
+#define OFDM_CHANEST_OFF 0
+#define OFDM_CHANEST_T4 1   /* pilots prev/this/next/future, weights 1,3,3,1 */
+#define OFDM_CHANEST_T4F3 2 /* ...and 1-2-1 across adjacent carriers */
+#define OFDM_CHANEST_T4F5 3 /* ...and 1-2-3-2-1 across carriers */
+void ofdm_set_chanest_alt(struct OFDM *, int mode);
+int ofdm_get_chanest_alt(struct OFDM *);
+/* Cyclic-prefix recycling: a further alternative-estimate attempt on rows
+ * whose prefix samples were averaged with their twins.  guard_samples is the
+ * number of samples at the head of the prefix left out (they may hold the
+ * previous symbol's echo); 0, negative or longer than the prefix = off.
+ * See docs/improvements/19-cp-recycling.md. */
+void ofdm_set_cp_recycle(struct OFDM *, int guard_samples);
+int ofdm_get_cp_recycle(struct OFDM *);
+void ofdm_set_noise_weight(struct OFDM *, int on);
+int ofdm_get_noise_weight(struct OFDM *);
+void ofdm_set_noise_stats(struct OFDM *, int on);
+int ofdm_noise_profile_get(const struct OFDM *, float *per_carrier);
+/* Window placement from the pilots' delay profile: a last decode attempt that
+ * demodulates the burst again with the FFT window and the frame grid following
+ * the paths found in the pilot rows.  Off (0) by default; modes with fewer
+ * than 9 carriers refuse it.  See docs/improvements/26-window-placement.md. */
+void ofdm_set_profile_track(struct OFDM *, int on);
+int ofdm_get_profile_track(struct OFDM *);
 void ofdm_set_sync(struct OFDM *, int);
 void ofdm_set_tx_bpf(struct OFDM *, bool);
 void ofdm_set_dpsk(struct OFDM *ofdm, bool val);

@@ -22,6 +22,7 @@
 #include "arq.h"
 #include "arq_protocol.h"
 #include "modem.h"
+#include "modem_freedv.h"
 #include "broadcast.h"
 #include "defines_modem.h"
 #include "audioio/audioio.h"
@@ -194,6 +195,17 @@ int mercury_engine_init(const mercury_config *cfg,
     arq_set_max_keydown_s(cfg->max_keydown_s);
     modem_set_tx_gain(powf(10.0f, cfg->tx_gain_db / 20.0f));
     modem_set_tx_delay_ms(cfg->tx_delay_ms);
+    modem_freedv_set_chanest(cfg->rx_chanest);
+    modem_freedv_set_cp_recycle(cfg->rx_cp_recycle);
+    modem_freedv_set_profile_track(cfg->rx_profile_track ? 1 : 0);
+    modem_freedv_set_noise_weight(cfg->rx_noise_weight ? 1 : 0);
+    modem_set_rx_blanker(cfg->rx_blanker);
+    modem_set_rx_notch(cfg->rx_notch);
+    modem_freedv_set_early_stop(cfg->rx_early_stop ? 1 : 0);
+    modem_freedv_set_decision_directed(cfg->rx_decision_directed ? 1 : 0);
+    modem_freedv_set_chanstats(cfg->chanstats ? 1 : 0);
+    modem_freedv_set_rx_all(cfg->rx_improvements ? 1 : 0);
+    modem_freedv_set_qam16c2_clip(cfg->qam16c2_tx_clip ? 1 : 0);
     modem_set_busy_cfg((float)cfg->busy_threshold_db,
                        (float)cfg->busy_hysteresis_db,
                        (uint32_t)cfg->busy_on_debounce_ms,

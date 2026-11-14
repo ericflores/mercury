@@ -1,0 +1,4 @@
+DATAC1 512 B, burst 4.40 s, chan CCIR 520 Poor: 2 ms, 1 Hz, tone 0 Hz -99 dB, impulses 0.0/s +0 dB
+No       meas            stock          tpa         t4f3     t4f3+tpa   (acquired/delivered per 60)
+  -34.0    +3.79      59/42        59/43        59/51        59/51      any  52
+  -32.0    +1.80      57/9         57/8         57/28        57/30      any  31

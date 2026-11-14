@@ -1,0 +1,4 @@
+DATAC1 512 B, chan AWGN
+SNR3k    meas              stock          mi400         mi1600          ens50   (acquired/delivered per 80)
+   +0.8    +0.75        80/22          80/31          80/36          80/22      any  36
+   +1.0    +1.00        80/70          80/76          80/77          80/70      any  77

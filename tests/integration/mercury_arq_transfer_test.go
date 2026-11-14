@@ -94,6 +94,17 @@ func TestMercuryARQTransfer(t *testing.T) {
 	if err != nil {
 		t.Skipf("channel simulator unavailable: %v", err)
 	}
+	// Carrier and impulse interference is the watterson tool's: ch has no
+	// such options, and a run that asked for it must not pass without it.
+	if params.Engine != "watterson" {
+		for _, k := range []string{"MERCURY_CH_TONE", "MERCURY_CH_IMPULSES"} {
+			for _, sfx := range []string{"", "_FWD", "_REV"} {
+				if os.Getenv(k+sfx) != "" {
+					t.Fatalf("%s needs MERCURY_CH_ENGINE=watterson", k+sfx)
+				}
+			}
+		}
+	}
 
 	if v := os.Getenv("MERCURY_CH_NO"); v != "" {
 		no, err := strconv.ParseFloat(v, 64)

@@ -38,6 +38,14 @@ type ChannelParams struct {
 	Fading       string // multipath profile name; see the type comment
 	Engine       string // "" or "ch" = codec2 ch.c; "watterson" = utils/watterson_test
 
+	// Interference the receiving station hears, added after the channel
+	// (watterson engine only): Tone is "Hz,dBFS" (a steady carrier, peak
+	// against full scale), Impulses is "per_second,dBFS[,ms]" (noise
+	// bursts).  "" = none.  MERCURY_CH_TONE / MERCURY_CH_IMPULSES set both
+	// directions, the _FWD / _REV forms one ("none" clears it).
+	Tone     string
+	Impulses string
+
 	// Distinguishes the two directions' fading realisations.
 	//
 	// Both directions spawn their own channel process, and both would inherit
@@ -78,6 +86,14 @@ func (p ChannelParams) args() []string {
 	}
 	if p.Fading != "" {
 		a = append(a, "--"+p.Fading)
+	}
+	if p.Engine == "watterson" {
+		if p.Tone != "" {
+			a = append(a, "--tone", p.Tone)
+		}
+		if p.Impulses != "" {
+			a = append(a, "--impulses", p.Impulses)
+		}
 	}
 	return a
 }
@@ -335,6 +351,28 @@ func directionParams(params ChannelParams) (fwd, rev ChannelParams) {
 	// mistuned link is asymmetric -- two radios with independent references
 	// put the offset on one direction only -- and that is the case the
 	// acquisition's capture window is about (docs/ACQUISITION-WINDOWS.md).
+	// Interference at the receiving end (watterson engine): the same for both
+	// stations, or for one direction only -- a carrier or an inverter near
+	// station B is in what B hears, the forward direction.
+	for _, d := range []struct {
+		p   *ChannelParams
+		sfx string
+	}{{&fwd, "_FWD"}, {&rev, "_REV"}} {
+		for _, k := range []struct {
+			env string
+			dst *string
+		}{{"MERCURY_CH_TONE", &d.p.Tone}, {"MERCURY_CH_IMPULSES", &d.p.Impulses}} {
+			if v := os.Getenv(k.env); v != "" {
+				*k.dst = v
+			}
+			if v := os.Getenv(k.env + d.sfx); v != "" {
+				*k.dst = v
+				if v == "none" {
+					*k.dst = ""
+				}
+			}
+		}
+	}
 	if v := os.Getenv("MERCURY_CH_FREQ_FWD"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			fwd.FreqOffsetHz = f

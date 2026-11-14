@@ -26,6 +26,11 @@
  *                      the frame grid (proposal 26); decodes from the t4 rows
  *                      whatever estimator token is given; modes of fewer than
  *                      9 carriers refuse it
+ *               nw     noise-aware soft bits (proposal 07): when the pilots'
+ *                      residuals single out carriers, one more attempt with
+ *                      those carriers scaled down, from the best rows the
+ *                      other tokens give (recycled, else alternative
+ *                      estimate, else stock)
  *             e.g. stock,t4f5,t4f5+cp4,t4f5+cp20,pt,t4f3+cp4+pt
  *   tone      an unmodulated carrier at tone_hz, tone_db relative to the
  *             burst's total power
@@ -57,7 +62,7 @@ static bench_rng rng = {1357911131517ULL};
 static double gauss(void) { return bench_rng_gauss(&rng); }
 static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
 
-typedef struct { int chanest; int cp; int pt; char name[64]; } variant_t;
+typedef struct { int chanest; int cp; int pt; int nw; char name[64]; } variant_t;
 
 /* Parse one variant: '+'-joined exact tokens.  0 on success. */
 static int parse_variant(const char *s, variant_t *v) {
@@ -69,6 +74,7 @@ static int parse_variant(const char *s, variant_t *v) {
   v->chanest = OFDM_CHANEST_OFF;
   v->cp = 0;
   v->pt = 0;
+  v->nw = 0;
   char *save = NULL;
   for (char *t = strtok_r(tmp, "+", &save); t; t = strtok_r(NULL, "+", &save)) {
     int est = -1;
@@ -79,6 +85,7 @@ static int parse_variant(const char *s, variant_t *v) {
       v->pt = 1;
       continue;
     }
+    else if (!strcmp(t, "nw")) { v->nw = 1; continue; }
     else if (!strcmp(t, "t4")) est = OFDM_CHANEST_T4;
     else if (!strcmp(t, "t4f3")) est = OFDM_CHANEST_T4F3;
     else if (!strcmp(t, "t4f5")) est = OFDM_CHANEST_T4F5;
@@ -97,10 +104,10 @@ static int parse_variant(const char *s, variant_t *v) {
       v->cp = (int)n;
       continue;
     }
-    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt\n", t, s);
+    fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw\n", t, s);
     return -1;
   }
-  if (have_stock && (have_est || have_cp || have_pt)) {
+  if (have_stock && (have_est || have_cp || have_pt || v->nw)) {
     fprintf(stderr, "variant '%s': 'stock' cannot be combined\n", s);
     return -1;
   }
@@ -140,6 +147,7 @@ int main(int argc, char **argv) {
     freedv_set_chanest_alt(rx[k], v[k].chanest);
     freedv_set_cp_recycle(rx[k], v[k].cp);
     freedv_set_profile_track(rx[k], v[k].pt);
+    freedv_set_noise_weight(rx[k], v[k].nw);
     if (freedv_get_profile_track(rx[k]) != v[k].pt) {
       fprintf(stderr, "variant '%s': %s has too few carriers for profile tracking\n", v[k].name, argv[1]);
       return 1;

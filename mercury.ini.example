@@ -182,6 +182,18 @@ rx_cp_recycle = 0
 ; it.
 rx_profile_track = false
 
+; One more decode attempt for OFDM frames hit by narrowband interference: a CW
+; carrier, an FSK signal, another station on part of the passband (issue #7).
+; The receiver keeps a per-carrier noise profile from the pilots of every
+; burst; when a frame fails and the profile shows carriers with at least twice
+; the noise of the median carrier, the frame is decoded once more with those
+; carriers' soft bits scaled down.  Receiver only: it works with any peer.
+; With a flat profile it does nothing and costs nothing.  true or false
+; (default false).  Bench-measured only (docs/NOISE-WEIGHT-FINDINGS.md); not
+; yet tried on the air.  Costs one more LDPC decode on a frame that failed
+; while a carrier stood out.  MERCURY_NOISE_WEIGHT=1 overrides it.
+rx_noise_weight = false
+
 ; TX keying delay in milliseconds (default: 10), waited after PTT ON before
 ; audio is written to the playback device on TX. The default covers the
 ; local radio relay's switch time. Increase this if your host app drives

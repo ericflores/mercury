@@ -72,6 +72,7 @@
 #define CFG_KEY_RX_CHANEST          "audio:rx_chanest"
 #define CFG_KEY_RX_CP_RECYCLE       "audio:rx_cp_recycle"
 #define CFG_KEY_RX_PROFILE_TRACK    "audio:rx_profile_track"
+#define CFG_KEY_RX_NOISE_WEIGHT     "audio:rx_noise_weight"
 #define CFG_KEY_TNC_KEEPALIVE_S     "tnc:keepalive_s"
 #define CFG_KEY_TNC_BUFFER_REPORT_MS "tnc:buffer_report_ms"
 #define CFG_KEY_ARQ_RETRY_STAGGER_MS          "arq:retry_stagger_ms"
@@ -151,6 +152,10 @@ typedef struct {
                                     * demodulated again with the FFT window
                                     * placed from the pilots' delay profile
                                     * (issue #26).  false (default) off. */
+    bool     rx_noise_weight;       /* One more decode attempt with the soft
+                                    * bits of carriers the pilots show to be
+                                    * interfered scaled down (issue #7).
+                                    * false (default) off. */
     float    tx_gain_db;            /* Linear-equivalent gain on the modulator
                                     * TX samples, in dB. 0.0 = no change.
                                     * Range -20.0 .. +20.0 (clamped). */

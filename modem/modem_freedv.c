@@ -99,6 +99,28 @@ static int profile_track_setting(void)
     return e[0] == '1';
 }
 
+/* Noise-aware soft bits (docs/improvements/07): a per-carrier noise profile
+ * from the pilots and, for a packet that failed while the profile singles out
+ * carriers, one more decode attempt with those carriers scaled down.
+ * Receiver only.  OFF unless asked for: audio:rx_noise_weight in the ini
+ * (modem_freedv_set_noise_weight(), before the instances are opened) or
+ * MERCURY_NOISE_WEIGHT=1, which wins when set (any other value switches it
+ * off). */
+static int g_noise_weight = 0;
+
+void modem_freedv_set_noise_weight(int on)
+{
+    g_noise_weight = on ? 1 : 0;
+}
+
+static int noise_weight_setting(void)
+{
+    const char *e = getenv("MERCURY_NOISE_WEIGHT");
+    if (!e || !*e)
+        return g_noise_weight;
+    return e[0] == '1';
+}
+
 static void *fdv_open(int mode)
 {
     /* FSK_LDPC needs an advanced open (was open_freedv_mode_locked in modem.c).
@@ -115,6 +137,7 @@ static void *fdv_open(int mode)
         freedv_set_chanest_alt(f, chanest_for_mode(mode));
         freedv_set_cp_recycle(f, cp_recycle_setting());
         freedv_set_profile_track(f, profile_track_setting());
+        freedv_set_noise_weight(f, noise_weight_setting());
     }
     return f;
 }
@@ -164,7 +187,7 @@ static int fdv_rawdata_rx(void *ctx, uint8_t *bytes_out, const int16_t *demod_in
     int n = (int)freedv_rawdatarx(FDV(ctx), bytes_out, (short *)demod_in);
     /* A frame delivered by one of the optional decode attempts (2 = the
      * alternative channel estimate, 3 = the recycled cyclic prefix, 4 = the
-     * profile-tracker replay) says so in the timing log: it is the only way
+     * profile-tracker replay, 5 = the noise-weighted attempt) says so in the timing log: it is the only way
      * to see, in a session, that a switch did something.  Paths 0 and 1 (the
      * stock decode and the HARQ combine) stay silent, so with the switches
      * off the log is what it was. */

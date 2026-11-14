@@ -25,6 +25,10 @@ void modem_freedv_set_chanest(int mode);
  * MERCURY_CP_RECYCLE when that is set. */
 void modem_freedv_set_cp_recycle(int guard_samples);
 
+/* Noise-aware soft bits for instances opened from now on: 0 = off (default),
+ * 1 = on.  Overridden by MERCURY_NOISE_WEIGHT when that is set. */
+void modem_freedv_set_noise_weight(int on);
+
 /* Window placement from the pilots' delay profile for instances opened from
  * now on: 0 = off (default), 1 = on.  Overridden by MERCURY_PROFILE_TRACK
  * when that is set. */

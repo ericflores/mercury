@@ -198,6 +198,7 @@ int mercury_engine_init(const mercury_config *cfg,
     modem_freedv_set_chanest(cfg->rx_chanest);
     modem_freedv_set_cp_recycle(cfg->rx_cp_recycle);
     modem_freedv_set_profile_track(cfg->rx_profile_track ? 1 : 0);
+    modem_freedv_set_noise_weight(cfg->rx_noise_weight ? 1 : 0);
     modem_set_busy_cfg((float)cfg->busy_threshold_db,
                        (float)cfg->busy_hysteresis_db,
                        (uint32_t)cfg->busy_on_debounce_ms,

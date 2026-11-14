@@ -52,6 +52,14 @@
  *                      acquisition to an interferer well outside their band,
  *                      and this says whether a plain filter, not a move,
  *                      would already cure it.  Not in mercury.
+ *               bs     the stretch of the passband the FSK interferer
+ *                      occupies taken out in front of the decoder (the audio
+ *                      minus that band-pass, centred on fsk_hz; as wide as
+ *                      the shift plus four times the baud rate plus 60 Hz,
+ *                      or RX_BENCH_BS_WIDTH).  A BENCH-ONLY probe for
+ *                      docs/improvements/TRANSMIT-SIDE-RESEARCH.md: the
+ *                      bench knows where the interferer is; what a receiver
+ *                      that had found it could do alone.  Not in mercury.
  *               es     early termination of LDPC decodes that are going
  *                      nowhere (proposal 23), on every attempt of the variant
  *               dd     decision-directed channel estimation as the last
@@ -81,6 +89,16 @@
  * and the two centres changed; bench only, nothing in modem/freedv changes).
  * The carriers sit on the symbol-rate grid, so the centre lands on the
  * nearest one.  Tone, FSK and impulses stay where they are asked to be.
+ * RX_BENCH_TCP_MS=ms, RX_BENCH_NS=n and RX_BENCH_NP=n open the mode, on both
+ * ends, with another cyclic prefix, pilot spacing (one pilot row in n) and
+ * modem frames per packet (same open; NP x (NS-1) x carriers x bits must
+ * still hold the mode's codeword and unique word, e.g. DATAC1 with NS=9
+ * NP=19).  RX_BENCH_TX_HOLE=centre_hz,width_hz makes the transmitter leave
+ * that stretch of its passband empty (a band-stop on the finished burst,
+ * before it is scaled to the common peak); the first trial prints how much
+ * of the burst's power was there and how deep the hole is.  All four are
+ * bench only and change the transmitted samples, so runs with and without
+ * them are not paired.
  * RX_BENCH_TIME=1 adds the CPU seconds per trial of each
  * variant; RX_BENCH_WRONG_SEED=1 is the wrong-session control (the receivers
  * expect a seeded CRC the transmitter does not use: delivered must be 0).
@@ -117,7 +135,7 @@ static bench_rng rng = {1357911131517ULL};
 static double gauss(void) { return bench_rng_gauss(&rng); }
 static double zero_noise(void *ctx) { (void)ctx; return 0.0; }
 
-typedef struct { int chanest; int cp; int pt; int nw; int notch; int bp; int es; int dd; float blank; char name[64]; } variant_t;
+typedef struct { int chanest; int cp; int pt; int nw; int notch; int bp; int bs; int es; int dd; float blank; char name[64]; } variant_t;
 
 /* Parse one variant: '+'-joined exact tokens.  0 on success. */
 static int parse_variant(const char *s, variant_t *v) {
@@ -133,6 +151,7 @@ static int parse_variant(const char *s, variant_t *v) {
   v->blank = 0.0f;
   v->notch = 0;
   v->bp = 0;
+  v->bs = 0;
   v->es = 0;
   v->dd = 0;
   char *save = NULL;
@@ -148,6 +167,7 @@ static int parse_variant(const char *s, variant_t *v) {
     else if (!strcmp(t, "nw")) { v->nw = 1; continue; }
     else if (!strcmp(t, "nt")) { v->notch = 1; continue; }
     else if (!strcmp(t, "bp")) { v->bp = 1; continue; }
+    else if (!strcmp(t, "bs")) { v->bs = 1; continue; }
     else if (!strcmp(t, "es")) { v->es = 1; continue; }
     else if (!strcmp(t, "dd")) { v->dd = 1; continue; }
     else if (!strcmp(t, "t4")) est = OFDM_CHANEST_T4;
@@ -178,7 +198,7 @@ static int parse_variant(const char *s, variant_t *v) {
     fprintf(stderr, "unknown variant token '%s' in '%s': stock, t4, t4f3, t4f5, cpN, pt, nw, bK, nt, bp, es, dd\n", t, s);
     return -1;
   }
-  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f || v->notch || v->bp || v->es || v->dd)) {
+  if (have_stock && (have_est || have_cp || have_pt || v->nw || v->blank > 0.0f || v->notch || v->bp || v->bs || v->es || v->dd)) {
     fprintf(stderr, "variant '%s': 'stock' cannot be combined\n", s);
     return -1;
   }
@@ -229,14 +249,23 @@ static void bandpass(short *x, int n, double fc, double bw) {
  * changes only the two centres; the mode name stays, so the filters and the
  * state machine are the mode's.  With centre 0 it is the plain open. */
 static struct freedv *open_mode(int mode, const char *name, double centre) {
-  if (centre <= 0.0) return freedv_open(mode);
+  /* Bench-only waveform variants (docs/improvements/TRANSMIT-SIDE-RESEARCH.md):
+   * RX_BENCH_TCP_MS sets the cyclic prefix, RX_BENCH_NS the pilot spacing
+   * (one pilot row in NS) and RX_BENCH_NP the modem frames per packet (NP x
+   * (NS-1) x carriers x bits must still hold the mode's codeword and unique
+   * word).  Transmitter and every receiver open the same variant. */
+  const char *etcp = getenv("RX_BENCH_TCP_MS"), *ens = getenv("RX_BENCH_NS"), *enp = getenv("RX_BENCH_NP");
+  if (centre <= 0.0 && !etcp && !ens && !enp) return freedv_open(mode);
   struct OFDM_CONFIG cfg;
   char lname[16];
   size_t i;
   for (i = 0; name[i] && i < sizeof(lname) - 1; i++) lname[i] = (char)tolower((unsigned char)name[i]);
   lname[i] = 0;
   ofdm_init_mode(lname, &cfg);
-  cfg.tx_centre = cfg.rx_centre = (float)centre;
+  if (centre > 0.0) cfg.tx_centre = cfg.rx_centre = (float)centre;
+  if (etcp) cfg.tcp = (float)(atof(etcp) / 1000.0);
+  if (ens) cfg.ns = atoi(ens);
+  if (enp) cfg.np = atoi(enp);
   struct freedv_advanced adv = {0, 2, 100, 8000, 1000, 200, "H_256_512_4", &cfg};
   return freedv_open_advanced(FREEDV_MODE_DATA_CUSTOM, &adv);
 }
@@ -270,6 +299,9 @@ int main(int argc, char **argv) {
   double fsk_baud = getenv("RX_BENCH_FSK_BAUD") ? atof(getenv("RX_BENCH_FSK_BAUD")) : 45.45;
   double fsk_shift = getenv("RX_BENCH_FSK_SHIFT") ? atof(getenv("RX_BENCH_FSK_SHIFT")) : 170.0;
   double centre = getenv("RX_BENCH_CENTRE") ? atof(getenv("RX_BENCH_CENTRE")) : 0.0;
+  double tx_hole_hz = 0.0, tx_hole_bw = 0.0;
+  int tx_hole_said = 0;
+  if (getenv("RX_BENCH_TX_HOLE")) sscanf(getenv("RX_BENCH_TX_HOLE"), "%lf,%lf", &tx_hole_hz, &tx_hole_bw);
   if (mode < 0 || chan < 0) { fprintf(stderr, "bad mode/channel\n"); return 1; }
 
   variant_t v[16];
@@ -337,6 +369,39 @@ int main(int argc, char **argv) {
     for (int t = 0; t < trials; t++) {
       bench_fill_payload(payload, nbytes, &rng);
       int n = bench_make_burst(tx, burst, payload);
+      if (tx_hole_bw > 0.0) {
+        /* bench-only probe (RX_BENCH_TX_HOLE=centre_hz,width_hz): the
+         * transmitter leaves that stretch of its passband empty, as a
+         * band-stop after the modulator would.  The burst is then scaled to
+         * the common peak like any other, and the noise is set from its own
+         * power: the carriers that are left get the power of the ones that
+         * went.  The first trial reports how deep the hole is. */
+        static short *hb;
+        static int hn;
+        if (hn < n) { hb = realloc(hb, sizeof(short) * (size_t)n); hn = n; }
+        double mid = tx_hole_bw - 120.0 > 40.0 ? tx_hole_bw - 120.0 : 40.0;
+        double ptot = 0.0, pin = 0.0, pmid0 = 0.0, pmid1 = 0.0;
+        if (!tx_hole_said) {
+          memcpy(hb, burst, sizeof(short) * (size_t)n);
+          bandpass(hb, n, tx_hole_hz, mid);
+          for (int i = 0; i < n; i++) pmid0 += (double)hb[i] * hb[i];
+        }
+        memcpy(hb, burst, sizeof(short) * (size_t)n);
+        bandpass(hb, n, tx_hole_hz, tx_hole_bw);
+        for (int i = 0; i < n; i++) {
+          ptot += (double)burst[i] * burst[i];
+          pin += (double)hb[i] * hb[i];
+          burst[i] = (short)(burst[i] - hb[i]);
+        }
+        if (!tx_hole_said) {
+          memcpy(hb, burst, sizeof(short) * (size_t)n);
+          bandpass(hb, n, tx_hole_hz, mid);
+          for (int i = 0; i < n; i++) pmid1 += (double)hb[i] * hb[i];
+          printf("transmitter hole at %.0f Hz, %.0f Hz wide: it held %.1f %% of the burst's power; its middle %.0f Hz is now %.1f dB down\n",
+                 tx_hole_hz, tx_hole_bw, 100.0 * pin / (ptot + 1e-9), mid, 10.0 * log10((pmid0 + 1e-9) / (pmid1 + 1e-9)));
+          tx_hole_said = 1;
+        }
+      }
       double ps = 0.0, pk = 0.0;
       for (int i = 0; i < n; i++) {
         ps += (double)burst[i] * burst[i];
@@ -395,7 +460,7 @@ int main(int argc, char **argv) {
       for (int k = 0; k < nv; k++) {
         int ss = 0, got = 0;
         const short *src = buf;
-        if (v[k].blank > 0.0f || v[k].notch || v[k].bp) {
+        if (v[k].blank > 0.0f || v[k].notch || v[k].bp || v[k].bs) {
           memcpy(wbuf, buf, sizeof(short) * (size_t)ntot);
           src = wbuf;
         }
@@ -420,6 +485,21 @@ int main(int argc, char **argv) {
           rx_notch_process(&nt, wbuf, ntot);
         }
         if (v[k].bp) bandpass(wbuf, ntot, centre > 0.0 ? centre : 1500.0, mode_width_hz(argv[1]) + 100.0);
+        if (v[k].bs && fsk_db > -90.0) {
+          /* bench-only probe: the stretch of the passband the FSK interferer
+           * occupies taken out before the decoder (the audio minus a
+           * band-pass around it), with the interferer's place KNOWN.  What a
+           * receiver that had found it could do alone; finding it is not
+           * built.  Width: the shift plus the keying sidebands, or
+           * RX_BENCH_BS_WIDTH. */
+          static short *bsb;
+          static int bsn;
+          if (bsn < ntot) { bsb = realloc(bsb, sizeof(short) * (size_t)ntot); bsn = ntot; }
+          double bw = getenv("RX_BENCH_BS_WIDTH") ? atof(getenv("RX_BENCH_BS_WIDTH")) : fsk_shift + 4.0 * fsk_baud + 60.0;
+          memcpy(bsb, wbuf, sizeof(short) * (size_t)ntot);
+          bandpass(bsb, ntot, fsk_hz, bw);
+          for (int i = 0; i < ntot; i++) wbuf[i] = (short)(wbuf[i] - bsb[i]);
+        }
         if (v[k].blank > 0.0f) {
           /* a fresh blanker per trial: the lead of noise before the burst
            * sets its level, as the noise before a burst does on the air */

@@ -7,6 +7,7 @@
 #include "modem_freedv.h"
 #include "freedv_api.h"
 #include "codec2_ofdm.h"
+#include "../common/hermes_log.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -160,7 +161,21 @@ static int fdv_nin(void *ctx) { return freedv_nin(FDV(ctx)); }
 
 static int fdv_rawdata_rx(void *ctx, uint8_t *bytes_out, const int16_t *demod_in)
 {
-    return (int)freedv_rawdatarx(FDV(ctx), bytes_out, (short *)demod_in);
+    int n = (int)freedv_rawdatarx(FDV(ctx), bytes_out, (short *)demod_in);
+    /* A frame delivered by one of the optional decode attempts (2 = the
+     * alternative channel estimate, 3 = the recycled cyclic prefix, 4 = the
+     * profile-tracker replay) says so in the timing log: it is the only way
+     * to see, in a session, that a switch did something.  Paths 0 and 1 (the
+     * stock decode and the HARQ combine) stay silent, so with the switches
+     * off the log is what it was. */
+    if (n > 0)
+    {
+        int path = freedv_get_rx_decode_path(FDV(ctx));
+        if (path >= 2)
+            HLOGT("modem-rx", "rx decode path %d (mode %d, %d bytes)", path,
+                  freedv_get_mode(FDV(ctx)), n);
+    }
+    return n;
 }
 
 static void fdv_get_stats(void *ctx, int *sync, float *snr)

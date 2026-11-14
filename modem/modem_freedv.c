@@ -8,6 +8,9 @@
 #include "freedv_api.h"
 #include "codec2_ofdm.h"
 #include "../common/hermes_log.h"
+#include "../datalink_arq/arq_protocol.h" /* the rungs' decode thresholds, read only */
+#include "chan_classify.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -223,6 +226,21 @@ void modem_freedv_set_chanstats(int on)
  * this on every call and must not go to the environment each time. */
 static int g_chanstats_on = 0;
 
+/* The decode threshold of the rung a mode is (datalink_arq/arq_protocol.h);
+ * NAN for a mode that is no rung, which switches the "noise" class off. */
+static float chanstats_rung_thresh(int mode)
+{
+    switch (mode)
+    {
+    case FREEDV_MODE_DATAC4:  return ARQ_SNR_MIN_DATAC4_DB;
+    case FREEDV_MODE_DATAC3:  return ARQ_SNR_MIN_DATAC3_DB;
+    case FREEDV_MODE_DATAC1:  return ARQ_SNR_MIN_DATAC1_DB;
+    case FREEDV_MODE_DATAC17: return ARQ_SNR_MIN_DATAC17_DB;
+    case FREEDV_MODE_QAM16C2: return ARQ_SNR_MIN_QAM16C2_DB;
+    default:                  return NAN;
+    }
+}
+
 static int chanstats_setting(void)
 {
     const char *e = getenv("MERCURY_CHANSTATS");
@@ -325,10 +343,35 @@ static int fdv_rawdata_rx(void *ctx, uint8_t *bytes_out, const int16_t *demod_in
         int st = freedv_get_rx_status(FDV(ctx));
         struct freedv_rx_frame_stats fs;
         if ((st & (FREEDV_RX_BITS | FREEDV_RX_BIT_ERRORS)) && freedv_get_rx_frame_stats(FDV(ctx), &fs))
+        {
+            /* dopp (Hz) and dly (ms) are coarse: a 3 s burst of 0.11 s pilot
+             * rows cannot resolve a Doppler spread under about 0.5 Hz or
+             * over 5 Hz, and dly reads the two-path separation that has the
+             * same decorrelation across carriers.  evm is the data symbols'
+             * error in dB under their power, evmx over what the pilot noise
+             * predicts, evmr over that and the mode's own transmitter floor.
+             * A field that could not be formed reads 0.  limit= is the first
+             * classification (modem/chan_classify.c), reported only. */
+            chan_class_in_t ci = {.snr_db = fs.snr_db,
+                                  .thresh_db = chanstats_rung_thresh(freedv_get_mode(FDV(ctx))),
+                                  .nv_peak_db = fs.noise_peak_db,
+                                  .have_spread = (fs.chan_valid & 7) == 7,
+                                  .evm_resid_db = fs.evm_resid_db,
+                                  .dly_ms = fs.dly_ms,
+                                  .dopp_hz = fs.dopp_hz,
+                                  .cp_ms = fs.cp_ms,
+                                  /* not built yet: the blanker's fraction and the silent-gap statistics */
+                                  .blank_frac = -1.0f,
+                                  .gap_kurt = -1.0f,
+                                  .gap_peaks = -1};
             HLOGT("modem-rx",
-                  "chanstats: mode=%d ok=%d path=%d snr=%.1f foff=%.1f pcc=%d/%d it=%d nvpk=%.1f nvhz=%.0f nvflag=%d",
+                  "chanstats: mode=%d ok=%d path=%d snr=%.1f foff=%.1f pcc=%d/%d it=%d nvpk=%.1f nvhz=%.0f nvflag=%d"
+                  " dopp=%.1f dly=%.2f evm=%.1f evmx=%.1f evmr=%.1f limit=%s",
                   freedv_get_mode(FDV(ctx)), fs.ok, fs.path, (double)fs.snr_db, (double)fs.foff_hz, fs.pcc, fs.npc,
-                  fs.iters, (double)fs.noise_peak_db, (double)fs.noise_peak_hz, fs.noise_flagged);
+                  fs.iters, (double)fs.noise_peak_db, (double)fs.noise_peak_hz, fs.noise_flagged, (double)fs.dopp_hz,
+                  (double)fs.dly_ms, (double)fs.evm_db, (double)fs.evm_excess_db, (double)fs.evm_resid_db,
+                  chan_class_name(chan_classify(&ci)));
+        }
     }
     return n;
 }

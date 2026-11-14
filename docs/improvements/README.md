@@ -14,18 +14,18 @@ first.
 
 | order | spec | issue | kind | depends on | status |
 |---|---|---|---|---|---|
-| 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`); impairment library, inverter presets, replay to do |
-| 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | implemented behind `MERCURY_CHANEST`, bench findings in `docs/CHANNEL-ESTIMATION-FINDINGS.md`; ini key, false-accept controls, offset runs, Pi timing, integration A/B to do |
-| 2 | [19-cp-recycling.md](19-cp-recycling.md) | #19 | receiver only | 09 | implemented behind `MERCURY_CP_RECYCLE`, bench findings in `docs/CP-RECYCLING-FINDINGS.md`; guard/margin sweep, offset runs, false-accept controls, Pi timing to do |
-| 3 | [26-window-placement.md](26-window-placement.md) | #26 | receiver only | 09, 19 (the attempt list), 23 | implemented behind `MERCURY_PROFILE_TRACK`, bench findings in `docs/PROFILE-TRACKING-FINDINGS.md`: on disturbed NVIS DATAC1 12 → 55 of 60 at +7.8 dB, DATAC3 27 → 53; a second opinion at the unique word (the gap to the prototype), other presets, offsets, false-accept controls, Pi timing to do |
-| 4 | [23-rx-effort.md](23-rx-effort.md) | #23 | receiver only | nothing; gates 09 as a default and every later fallback attempt | cost of a failed decode measured on x86; Pi not measured |
-| 5 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | prototype measured |
-| 6 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | prototype measured |
-| 7 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | evidence in tree |
-| 8 | [20-decision-directed.md](20-decision-directed.md) | #20 | receiver only | 09, 19, 23 | ceiling measured with a genie (1-2 dB; 2-3× frames on NVIS) |
+| 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`), replay of recordings (`utils/rx_replay`), tone and impulse interference in the bench and on a session's channel, the false-accept controls; FSK interferer, inverter presets, MFSK path to do |
+| 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | implemented behind `MERCURY_CHANEST`, bench findings in `docs/CHANNEL-ESTIMATION-FINDINGS.md`, sessions in `docs/INTEGRATION-AB-FINDINGS.md`; offset runs, Pi timing to do |
+| 2 | [19-cp-recycling.md](19-cp-recycling.md) | #19 | receiver only | 09 | implemented behind `MERCURY_CP_RECYCLE`, bench findings in `docs/CP-RECYCLING-FINDINGS.md`, sessions in `docs/INTEGRATION-AB-FINDINGS.md`; guard/margin sweep, offset runs, Pi timing to do |
+| 3 | [26-window-placement.md](26-window-placement.md) | #26 | receiver only | 09, 19 (the attempt list), 23 | implemented behind `MERCURY_PROFILE_TRACK`, bench findings in `docs/PROFILE-TRACKING-FINDINGS.md`: on disturbed NVIS DATAC1 12 → 55 of 60 at +7.8 dB, DATAC3 27 → 53; sessions in `docs/INTEGRATION-AB-FINDINGS.md`; a second opinion at the unique word (the gap to the prototype), other presets, offsets, Pi timing to do |
+| 4 | [23-rx-effort.md](23-rx-effort.md) | #23 | receiver only | nothing; gates 09 as a default and every later fallback attempt | step 2 (early termination) implemented behind `MERCURY_RX_EARLY_STOP`, findings in `docs/RX-EFFORT-FINDINGS.md`; cost measured on x86 only; budget, effort levels, helper thread, Pi timing to do |
+| 5 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | implemented: weights behind `MERCURY_NOISE_WEIGHT` and the automatic carrier notch behind `MERCURY_NOTCH`; findings in `docs/NOISE-WEIGHT-FINDINGS.md`; time weights, FSK interferer, on-air to do |
+| 6 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | implemented behind `MERCURY_BLANKER`, findings in `docs/BLANKER-FINDINGS.md`; MFSK bench, periodic mode, real static to do |
+| 7 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | implemented behind `MERCURY_QAM16C2_CLIP`: PAPR 11.62 → 6.69 dB at the same peak (`docs/CLIPPED-QAM16C2-FINDINGS.md`, "As shipped"); on-air and the ladder threshold to do |
+| 8 | [20-decision-directed.md](20-decision-directed.md) | #20 | receiver only | 09, 19, 23 | first phase implemented behind `MERCURY_DD`, findings in `docs/DECISION-DIRECTED-FINDINGS.md`; the genie as a bench variant, the NVIS phase to do |
 | 9 | [03-directed-acquisition.md](03-directed-acquisition.md) | #3 | receiver only | 00 | not measured |
 | 10 | [21-full-frame-acquisition.md](21-full-frame-acquisition.md) | #21 | receiver only | 00; complements 03 | arithmetic only |
-| 11 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | not measured |
+| 11 | [10-channel-telemetry.md](10-channel-telemetry.md) | #10 | receiver only, logging | 07 (residuals) | first part implemented behind `MERCURY_CHANSTATS` (a line per packet: mode, ok, path, SNR, offset, parity, iterations, noisiest carrier); Doppler, delay, EVM, gap statistics, classification to do |
 | 12 | [06-mfsk-metrics.md](06-mfsk-metrics.md) | #6 | receiver only | 00 | not measured |
 | 13 | [05-apriori-redecode.md](05-apriori-redecode.md) | #5 | receiver only | 09 (fallback path) | not measured |
 | 14 | [12-osd.md](12-osd.md) | #12 | receiver only | nothing | not measured |

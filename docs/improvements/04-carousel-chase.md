@@ -154,3 +154,17 @@ for the rung as its combined outcome, not as a second independent loss
   channels gain; integrity 100 % on every seed.
 - Floor: with repeats, sessions complete 3 dB below the level where they
   complete today on AWGN (bench and integration).
+
+## Note (2026-11-14): proposal 28 builds on this one
+
+Repeating a whole frame and combining is the simplest way of adding
+redundancy to a frame that failed. Proposal 28
+(`28-redundancy-instalments.md`) generalises it: a frame sent thin, and
+top-ups that carry only bits not sent yet. It reuses this proposal's
+sender frame store, repeat request and receiver soft-bit store, so design
+those three with a "level" in mind (which part of the codeword a burst
+carries), not only "the same frame again". Measured at code level
+(`TRANSMIT-SIDE-RESEARCH.md` section 2.3): at DATAC1's cliff a repeat costs
+2.85 coded bits per payload bit against 3.48 for discarding and 2.11 for
+instalments; a repeat is 0.7 to 1.4 dB behind what new parity would do,
+and is the only option that needs no change to what a frame carries.

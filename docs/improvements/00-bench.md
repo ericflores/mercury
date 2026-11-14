@@ -182,5 +182,14 @@ AWGN points with the stock variant and checks the counts against
   and keeps the timing logs with `MERCURY_TEST_LOGDIR`.
 - The modem's timing log names the optional decode attempt that delivered a
   frame and gives the session's CRC seed, which `rx_replay` needs.
-- Still to do: an FSK interferer and the inverter presets, a tone and
-  impulses in `rx_bench` under a fading preset's own noise, an MFSK path.
+- `rx_bench` also has a two-tone FSK interferer (RTTY-like by default,
+  `RX_BENCH_FSK_BAUD` / `RX_BENCH_FSK_SHIFT`), the moved centre
+  (`RX_BENCH_CENTRE`), and bench-only probes for the transmit-side research
+  note: another cyclic prefix or pilot spacing on both ends
+  (`RX_BENCH_TCP_MS`, `RX_BENCH_NS`, `RX_BENCH_NP`), the interferer's
+  stretch taken out at the receiver (token `bs`), and a transmitter that
+  leaves a stretch empty (`RX_BENCH_TX_HOLE`).
+- `utils/ldpc_ir_sweep CODE`: a codeword sent in parts, the codes and the
+  decoder alone (proposal 28). Built on demand.
+- Still to do: the inverter presets, a tone and impulses in `rx_bench`
+  under a fading preset's own noise, an MFSK path.

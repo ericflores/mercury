@@ -145,3 +145,19 @@ Findings: `docs/RX-EFFORT-FINDINGS.md`.
 - Not built: the three-machine timing table (step 1; x86 only), the budget,
   the effort levels, the helper thread. The MFSK decoder has its own LDPC
   and is not covered.
+
+## Note (2026-11-14): decodes that run to the limit with every bit right
+
+Found while measuring proposal 28 (`TRANSMIT-SIDE-RESEARCH.md` section
+2.5). `SumProductStall` (`mpdecode_core.c`) stops when the count of
+satisfied checks, taken from extrinsic signs, is complete. Near a cliff
+that count stays one or two short on up to 15 % of frames **whose bits are
+all correct**, and the decode runs to `max_iter`. Measured on whole
+codewords with random payloads, 40 trials: DATAC1's code 3 dB over its
+cliff, 35 frames stop after about 9 iterations and 5 run to 100; the
+codes of DATAC3, DATAC15 and DATAC17 behave the same (33 to 36 of 40 stop
+early). A stop test on the syndrome of the hard decisions would end those
+decodes at the iteration where they are already right. Not built; it needs
+its own switch and the no-change test of every decoder change. Proposal 28
+needs it in any case, because with bits left out the count never
+completes.

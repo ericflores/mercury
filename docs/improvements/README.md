@@ -14,12 +14,12 @@ first.
 
 | order | spec | issue | kind | depends on | status |
 |---|---|---|---|---|---|
-| 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`), replay of recordings (`utils/rx_replay`), tone and impulse interference in the bench and on a session's channel, the false-accept controls; FSK interferer, inverter presets, MFSK path to do |
+| 0 | [00-bench.md](00-bench.md) | #17 | test tooling | nothing | first stage (`utils/rx_bench`), replay of recordings (`utils/rx_replay`), tone and impulse interference in the bench and on a session's channel, the false-accept controls, an FSK interferer and the transmit-side probes in the bench (`utils/ldpc_ir_sweep`, prefix and pilot variants, a band-stop, a transmitter hole); inverter presets, MFSK path, a keyed interferer on a session's channel to do |
 | 1 | [09-channel-estimation.md](09-channel-estimation.md) | #9 | receiver only | 00 | implemented behind `MERCURY_CHANEST`, bench findings in `docs/CHANNEL-ESTIMATION-FINDINGS.md`, sessions in `docs/INTEGRATION-AB-FINDINGS.md`; offset runs, Pi timing to do |
 | 2 | [19-cp-recycling.md](19-cp-recycling.md) | #19 | receiver only | 09 | implemented behind `MERCURY_CP_RECYCLE`, bench findings in `docs/CP-RECYCLING-FINDINGS.md`, sessions in `docs/INTEGRATION-AB-FINDINGS.md`; guard/margin sweep, offset runs, Pi timing to do |
 | 3 | [26-window-placement.md](26-window-placement.md) | #26 | receiver only | 09, 19 (the attempt list), 23 | implemented behind `MERCURY_PROFILE_TRACK`, bench findings in `docs/PROFILE-TRACKING-FINDINGS.md`: on disturbed NVIS DATAC1 12 → 55 of 60 at +7.8 dB, DATAC3 27 → 53; sessions in `docs/INTEGRATION-AB-FINDINGS.md`; a second opinion at the unique word (the gap to the prototype), other presets, offsets, Pi timing to do |
 | 4 | [23-rx-effort.md](23-rx-effort.md) | #23 | receiver only | nothing; gates 09 as a default and every later fallback attempt | step 2 (early termination) implemented behind `MERCURY_RX_EARLY_STOP`, findings in `docs/RX-EFFORT-FINDINGS.md`; cost measured on x86 only; budget, effort levels, helper thread, Pi timing to do |
-| 5 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | implemented: weights behind `MERCURY_NOISE_WEIGHT` and the automatic carrier notch behind `MERCURY_NOTCH`; findings in `docs/NOISE-WEIGHT-FINDINGS.md`; time weights, FSK interferer, on-air to do |
+| 5 | [07-noise-aware-llr.md](07-noise-aware-llr.md) | #7 | receiver only | 00, 09 (shares the fallback path) | implemented: weights behind `MERCURY_NOISE_WEIGHT` and the automatic carrier notch behind `MERCURY_NOTCH`; findings in `docs/NOISE-WEIGHT-FINDINGS.md`: the notch for unmodulated carriers, the weights for a modulated narrow signal inside a wide mode (DATAC1 0 → 39 of 40 with an RTTY-like signal 3 dB under the burst); time weights, fading with an FSK interferer, on-air to do |
 | 6 | [08-impulse-blanker.md](08-impulse-blanker.md) | #8 | receiver only | 00 | implemented behind `MERCURY_BLANKER`, findings in `docs/BLANKER-FINDINGS.md`; MFSK bench, periodic mode, real static to do |
 | 7 | [02-qam16c2-tx-clip.md](02-qam16c2-tx-clip.md) | #2 | transmitter only | nothing | implemented behind `MERCURY_QAM16C2_CLIP`: PAPR 11.62 → 6.69 dB at the same peak (`docs/CLIPPED-QAM16C2-FINDINGS.md`, "As shipped"); on-air and the ladder threshold to do |
 | 8 | [20-decision-directed.md](20-decision-directed.md) | #20 | receiver only | 09, 19, 23 | first phase implemented behind `MERCURY_DD`, findings in `docs/DECISION-DIRECTED-FINDINGS.md`; the genie as a bench variant, the NVIS phase to do |
@@ -32,13 +32,16 @@ first.
 | 15 | [11-diversity.md](11-diversity.md) | #11 | receiver only, needs hardware | nothing | not measured |
 | 16 | [22-neural-receiver.md](22-neural-receiver.md) | #22 | research (GPU for training) | 00, 20 as the baseline to beat | not started; yardsticks measured |
 | 17 | [27-impairment-classifier.md](27-impairment-classifier.md) | #27 | research (GPU for training); receiver only if it wins | 10 (features and the rules to beat), 00, 23; 07 and 08 for most of its actions | not started; design only |
-| 18 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream |
+| 18 | [04-carousel-chase.md](04-carousel-chase.md) | #4 | wire change | capability negotiation (below) | modem part measured upstream; proposal 28 builds on its stores and request |
 | 19 | [14-short-control.md](14-short-control.md) | #14 | wire change | capability negotiation | arithmetic only |
 | 20 | [13-multi-packet-bursts.md](13-multi-packet-bursts.md) | #13 | wire change | capability negotiation, 03 | arithmetic only |
-| 21 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only |
+| 21 | [15-higher-rates.md](15-higher-rates.md) | #15 | wire change | 09, 02 | arithmetic only; new fact for step 1: `H_16200_9720` punctures to rates 0.79 and 0.88 within 0.4 dB of ideal at code level, so the higher rates may need no new matrices (`TRANSMIT-SIDE-RESEARCH.md` section 2.2; to be confirmed with the 16QAM demapper) |
 | 22 | [16-sub-band.md](16-sub-band.md) | #16 | wire change, research | 10, 07 | phase 0 measured on the bench (`docs/SUB-BAND-PHASE0-FINDINGS.md`): the notch covers a steady carrier; a modulated (FSK) interferer on the mode is recovered by nothing receiver-only and by a 500 Hz move for DATAC15/16/4 (DATAC3 also needs a receive filter); how often it happens on the air is not known (needs 10); no wire work started |
 | 23 | [24-qsy.md](24-qsy.md) | #24 | wire change, radio control | capability negotiation, busy detector, 10 | design only |
 | 24 | [25-vhf-uhf.md](25-vhf-uhf.md) | #25 | new modes and link timings | 00 (FM and wideband channel models), 15, 14, 23 | design only; **on hold** until the owner has radios fit to test with (do not start it) |
+| 25 | [30-spectrum-sharing.md](30-spectrum-sharing.md) | #30 | phase 1 receiver only; phase 2 wire change | 07, 10; capability negotiation for phase 2 | measured on the bench with the foreign signal's place known (`TRANSMIT-SIDE-RESEARCH.md` section 4): with its stretch taken out DATAC1 delivers 36 to 40 of 40 under an RTTY-like signal 20 dB over the burst, at 2.7 dB of cost to the link (1.6 dB when the transmitter leaves the hole too); the detector is not built |
+| 26 | [28-redundancy-instalments.md](28-redundancy-instalments.md) | #28 | wire change | capability negotiation, 04 (shares its stores and request), 23 (decoder stop test); 03 or 21 for the narrow rungs under their cliffs | measured at code level (`utils/ldpc_ir_sweep`, `TRANSMIT-SIDE-RESEARCH.md` section 2): the existing codes sent in parts are within 0.35 to 1.1 dB of ideal at every level; 30 % less airtime over the cliff, a smooth rate under it; nothing through the modem yet |
+| 27 | [29-channel-profile.md](29-channel-profile.md) | #29 | wire change | capability negotiation, 26 or 10 | measured on the bench (`TRANSMIT-SIDE-RESEARCH.md` section 3): DATAC1 with a 2 ms prefix, bursts 18 % shorter at the same delivery with the stock receiver up to 2 ms of delay, 0.6 dB of cost with 19 on; a long prefix does not rescue NVIS and sparser pilots are not worth it (both measured, not proposed) |
 
 Update the status column and tick the task list in the issue as work lands.
 
@@ -52,6 +55,15 @@ more compute.
 [MODEM73-NOTES.md](MODEM73-NOTES.md) goes through another open modem
 technique by technique and says which proposal each maps to; one of its
 ideas led to proposal 26.
+
+[TRANSMIT-SIDE-RESEARCH.md](TRANSMIT-SIDE-RESEARCH.md) is the research note
+behind proposals 28 to 30: how far each rung is from the Shannon limit and
+where the dB go, what the existing codes do when sent in parts, what
+another cyclic prefix or pilot spacing buys, what a narrow foreign signal
+does to a wide mode and what a hole in the passband costs, each mode's
+peak-to-average ratio, and what was tried and did **not** pay (a long
+prefix for NVIS, sparser pilots, harder clipping of the QPSK rungs). Read
+it before proposing anything on the transmit side.
 
 ## The four rules
 
@@ -407,6 +419,22 @@ These cost time during the prototype; do not repeat them.
 20. **A harness run can fail before it starts**: the two free ports it picks
     are released before the stations bind them, and now and then one is
     taken ("Could not open TCP port"). Retry; it is not the modem.
+21. **The decoder's parity count is not a success test.** `run_ldpc_decoder`
+    counts satisfied checks from extrinsic signs: on up to 15 % of frames
+    near a cliff it stays one or two short with every bit right (and runs to
+    the iteration limit), and with punctured bits it never completes. A
+    bench that asks for `pcc == NumberParityBits` reports frames as failed
+    that the CRC would deliver. Compare the payload bits.
+22. **A result on the narrow modes does not carry to the wide ones.** The
+    per-carrier weights were judged redundant after proposal 16's phase 0
+    (narrow rungs, where a narrow interferer covers the whole signal, and
+    carriers, which the notch removes). Inside a wide mode a modulated
+    narrow signal is exactly their case: 0 to 39 of 40. Measure each claim on
+    every mode it will be used for before dropping a feature.
+23. **`A && (B) & (C) &` in a shell runs only `A && (B)` in the first
+    background job**: a variable set by `A` does not exist for `(C)`. Two
+    bench outputs went to the wrong directory that way. Set variables on
+    their own line.
 
 ## Glossary
 

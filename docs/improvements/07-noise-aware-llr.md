@@ -199,3 +199,12 @@ path 5):
 - Why it was needed beyond the weights: on a carrier's centre the tone
   captures the frequency tracker, and a few dB over the signal it stops
   acquisition (handbook pitfall 16).
+
+## Note (2026-11-14): where the weights are the tool
+
+Measured later (`docs/NOISE-WEIGHT-FINDINGS.md`, "A modulated narrow signal
+inside a wide mode"): against a keyed narrow signal (RTTY-like, FT8-like)
+inside the passband of a wide mode the notch does nothing and the weights
+take DATAC1 from 0 to 39 of 40 (signal 3 dB under the burst) and QAM16C2
+from 0 to 30 of 30 (10 dB under). They stop where the frame is no longer
+acquired; proposal 30 (`30-spectrum-sharing.md`) continues from there.

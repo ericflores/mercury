@@ -37,6 +37,11 @@ delivered of 60:
   +20 dB), for every mode including the control frame and the MFSK floor,
   and never engaged on Mercury's own signals.
 - Neither loses a frame when there is no carrier.
+- **Against a modulated narrow signal inside a wide mode the weights are
+  the tool, and the notch does nothing** (added 2026-11-14, section "A
+  modulated narrow signal inside a wide mode"): DATAC1 with an RTTY-like
+  signal 3 dB under its own total power, 0 → 39 of 40; QAM16C2 with one
+  10 dB under, 0 → 30 of 30.
 
 In a session (two stations, 600 bytes, SNR +20 dB): with a carrier 3 dB
 over the signal the stock receiver takes 173 s and the notch 27-36 s; with
@@ -127,6 +132,42 @@ acquired with proposals 09 and 19 as well; DATAC4 at −3 dB 2 → 45; DATAC15
 at −3 dB 4 → 32. With three or four carriers the weights can only give up
 a third or a quarter of the frame, which is where they stop.
 
+### A modulated narrow signal inside a wide mode
+
+Added 2026-11-14 (`docs/improvements/TRANSMIT-SIDE-RESEARCH.md`, section
+4.2, has the whole table and what lies beyond the weights). The interferer
+is two-tone FSK, RTTY-like (45 baud, 170 Hz shift) or FT8-like (6.25 baud,
+44 Hz), at the given level relative to the burst's **total** power. White
+noise, per 40 (30 for QAM16C2):
+
+| mode, SNR3k | signal | stock | weights | 09 + 19 | 09 + 19 + weights | notch |
+|---|---|---|---|---|---|---|
+| DATAC1, +5 dB | RTTY-like on 1500 Hz, −10 dB | 40 | 40 | 40 | 40 | |
+| | −3 dB | 0 | **39** | 0 | **40** | |
+| | +3 dB | 0 | 0 | 0 | **36** | |
+| | +10 dB | 0 (none acquired) | 0 | 0 | 0 | |
+| DATAC1, +5 dB | RTTY-like on 2100 Hz, −3 dB | 0 | **39** | 0 | **39** | |
+| | +3 dB | 0 | 12 | 0 | **37** | |
+| | +10 dB | 0 (none acquired) | 0 | 0 | 0 | |
+| DATAC1, +5 dB | FT8-like on 1500 Hz, 0 dB | 0 | **39** | | | 0 |
+| | +10 dB | 0 (none acquired) | 0 | | | 0 |
+| QAM16C2, +14 dB | RTTY-like on 1500 Hz, −10 dB | 0 | **30** | 5 | **30** | |
+| | −3 dB (19 acquired) | 0 | **19** | 0 | **19** | |
+| | 0 dB | 0 (none acquired) | 0 | | | |
+
+A wide mode loses everything to a narrow signal well under its own power,
+because that signal's power sits on four or five of its carriers. The
+weights give those carriers up and the code carries the rest. They stop
+where the frame is no longer acquired (the signal about 10 dB over the
+burst for DATAC1, level with it for QAM16C2); beyond that the occupied
+stretch has to be taken out of the audio before the decoders, which is not
+built (the research note measures it with the signal's place known).
+
+The earlier statement in this document's caveats and in
+`docs/SUB-BAND-PHASE0-FINDINGS.md` that nothing receiver-only helps against
+a modulated interferer is about the **narrow** modes, where the interferer
+covers the whole signal.
+
 ### Fading
 
 DATAC1 per 60:
@@ -184,10 +225,11 @@ decode, on a frame that failed while a carrier stood out.
 ## Caveats
 
 - Bench and simulated sessions only; one seed; 40-100 trials a point.
-- **Unmodulated carriers only.** An FSK or PSK signal, voice, or another
-  data modem on part of the passband is not a line: the notch does not see
-  it and only the weights apply. Not measured (the bench has no such
-  interferer yet; proposal 16's phase 0 is about it).
+- **The notch is for unmodulated carriers only.** An FSK or PSK signal,
+  voice, or another data modem on part of the passband is not a line: the
+  notch does not see it and only the weights apply. Measured for two-tone
+  FSK on white noise (the section above, and proposal 16's phase 0 for the
+  narrow modes); not under fading, and not for voice.
 - The notch needs about 1.1 s of a carrier before it engages. A carrier
   that appears during a burst costs that burst.
 - It also removes a peer's ATU tuning carrier (TUNE), which nothing decodes.

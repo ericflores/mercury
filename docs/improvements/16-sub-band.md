@@ -115,3 +115,13 @@ wire change, slot table, signalling or carousel change was made.
   modulations. The decision with the maintainers (step 1) is still to be
   taken; a receive filter for DATAC3 and DATAC1 is a possible receiver-only
   step on its own.
+
+## Note (2026-11-14): the wide modes are proposal 30's
+
+This proposal moves a narrow rung away from an interferer. For the wide
+rungs (DATAC1, DATAC17, QAM16C2), where a narrow foreign signal covers
+only some of the carriers, the measured answers are the per-carrier
+weights of proposal 07 up to about the signal's own power, and beyond that
+a hole in the passband (`30-spectrum-sharing.md`,
+`TRANSMIT-SIDE-RESEARCH.md` section 4). The two proposals share the need
+for an occupancy measurement taken in the peer's gaps.

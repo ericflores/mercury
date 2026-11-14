@@ -131,3 +131,16 @@ both ends configured that bandwidth.
   `MODEM73-NOTES.md`): 64-QAM 3/4 at 19 dB, 256-QAM 3/4 at 24 dB. Its guide
   recommends staying under 8-PSK on HF and keeps the dense modes for FM
   links, which is proposal 25's ground.
+
+## Note (2026-11-14): step 1 may need no new matrices
+
+`utils/ldpc_ir_sweep H_16200_9720` (code level, QPSK, white noise): with
+76 % of the codeword sent, evenly spread over the parity (rate 0.79), half
+the frames decode at Ec/N0 +1.3 dB, 0.4 dB from an ideal code of that
+rate; with 68 % (rate 0.88) at +2.75 dB, 0.35 dB from ideal; the whole
+codeword at −1.15 dB. So the two higher rates of step 1 can be had by
+leaving parity out of the existing code (the mechanism of proposal 28,
+`28-redundancy-instalments.md`), instead of generating and validating two
+new matrices. To do before relying on it: the same measurement through the
+16QAM demapper (its bits are not equally reliable), and through the whole
+modem. See `TRANSMIT-SIDE-RESEARCH.md`, sections 2.2 and 6.

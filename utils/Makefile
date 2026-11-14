@@ -26,7 +26,7 @@ ifeq ($(OS),Windows_NT)
 LDFLAGS += -lws2_32
 endif
 
- OUT = broadcast_test broadcast_diag_tx broadcast_diag_rx watterson_test acquire_vs_decode rx_bench rx_replay acq_tuning_sweep qam16_papr_sweep resync_gap_probe burst_train_probe
+ OUT = broadcast_test broadcast_diag_tx broadcast_diag_rx watterson_test acquire_vs_decode rx_bench rx_replay rx_prefilter acq_tuning_sweep qam16_papr_sweep resync_gap_probe burst_train_probe
 
 # CPU-cost instruments.  Linux/macOS only: they time with
 # clock_gettime(CLOCK_PROCESS_CPUTIME_ID), which mingw-w64 does not provide
@@ -85,6 +85,11 @@ rx_bench: rx_bench.c bench_common.c chanutil.c ../common/watterson.c ../common/m
 # (MERCURY_RX_DUMP): every variant decodes the same samples.
 rx_replay: rx_replay.c bench_common.c ../modem/rx_blanker.c ../modem/rx_notch.c ../modem/freedv/libfreedvdata.a
 	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) ../modem/freedv/libfreedvdata.a $(LDFLAGS) -lm
+
+# The receive thread's carrier notch and impulse blanker applied to a raw
+# file, for tools that decode from one (the MFSK floor with mfsk_burst_file).
+rx_prefilter: rx_prefilter.c ../modem/rx_blanker.c ../modem/rx_notch.c
+	$(CC) $(CFLAGS) -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
 
 # Sweeps the acquisition knobs (timing_mx_thresh, bad_uw_errors) around the
 # ofdm_mode.c defaults and reports acq/del per SNR with a noise-only

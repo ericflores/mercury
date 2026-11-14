@@ -14,9 +14,11 @@
 # modem/rx_blanker.c).  Three seconds of the channel precede the frame, as a
 # carrier on the air has been there for a while when a frame arrives.
 #
-# The channel gain is 0.25 to leave room for interference above the signal
-# without clipping; the noise density follows it, so <snr3k> is what it says
-# (the -11.05 is mfsk_channel_sweep.sh's calibration of the frame's level).
+# The channel gain is 0.25 (G=<gain> in the environment changes it) to leave
+# room for interference above the signal without clipping; impulses 25 dB or
+# more over the signal need G=0.02.  The noise density follows the gain, so
+# <snr3k> is what it says (the -11.05 is mfsk_channel_sweep.sh's calibration
+# of the frame's level).
 #
 # Example: a carrier 10 dB over the floor's signal at 9 dB over its threshold
 #   utils/mfsk_interference_sweep.sh 100 30 -5 1500 10 0 0
@@ -29,7 +31,7 @@ TOOL="$HERE/mfsk_burst_file"; WT="$HERE/watterson_test"; PF="$HERE/rx_prefilter"
 [ -x "$WT" ] || make -C "$HERE" watterson_test >/dev/null || exit 1
 [ -x "$PF" ] || make -C "$HERE" rx_prefilter >/dev/null || exit 1
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
-G=0.25
+G=${G:-0.25}
 "$TOOL" tx "$MODE" 1 "$W/b.raw" "$W/f.raw"
 LVL=$("$PF" level "$W/b.raw")
 SIG=$(python3 -c "import math; print($LVL + 20*math.log10($G))")
@@ -41,7 +43,8 @@ ok0=0; ok1=0; ok2=0; ok3=0
 for t in $(seq 1 "$T"); do
   "$TOOL" tx "$MODE" "$t" "$W/b.raw" "$W/f.raw"
   "$PF" pad 3 "$W/f.raw" "$W/p.raw"
-  MERCURY_WATTERSON_SEED=$t "$WT" "$W/p.raw" "$W/n.raw" --No "$No" --gain $G $OPT 2>/dev/null
+  MERCURY_WATTERSON_SEED=$t "$WT" "$W/p.raw" "$W/n.raw" --No "$No" --gain $G $OPT 2>"$W/err" ||
+    { echo "the channel tool refused its options (interference above full scale? lower G):"; cat "$W/err"; exit 1; }
   ok0=$((ok0 + $("$TOOL" rx "$MODE" "$t" "$W/n.raw" 2>/dev/null)))
   "$PF" filter "$W/n.raw" "$W/x.raw" nt 2>/dev/null;    ok1=$((ok1 + $("$TOOL" rx "$MODE" "$t" "$W/x.raw" 2>/dev/null)))
   "$PF" filter "$W/n.raw" "$W/x.raw" b6 2>/dev/null;    ok2=$((ok2 + $("$TOOL" rx "$MODE" "$t" "$W/x.raw" 2>/dev/null)))

@@ -182,6 +182,13 @@ mfsk_burst_file: mfsk_burst_file.c ../modem/modem_mfsk.c $(MFSK_DSP_SRC) ../mode
 
 mfsk_puncture_sweep: mfsk_puncture_sweep.c ../modem/mfsk/mfsk_ldpc.c ../modem/mfsk/mfsk_ldpc_8_16.c
 	$(CC) $(CFLAGS) -I../modem -I../modem/mfsk -o $@ $(filter %.c %.a %.o,$^) -lm
+
+# How much of a codeword does a frame need at each noise level, and what would
+# sending the redundancy in instalments save?  The codes and the decoder of the
+# OFDM modes, nothing else of the modem (docs/improvements/TRANSMIT-SIDE-RESEARCH.md).
+# Built on demand, like mfsk_puncture_sweep: `make -C utils ldpc_ir_sweep`.
+ldpc_ir_sweep: ldpc_ir_sweep.c ../modem/freedv/libfreedvdata.a
+	$(CC) $(CFLAGS) -O2 -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
 # Broadcast a file to Mercury, or receive one, over the broadcast TCP/KISS port.
 BCAST_RQ_SRC = $(wildcard ../datalink_broadcast/raptorq/lib/*.c) \
                $(wildcard ../datalink_broadcast/raptorq/deps/obl/*.c)

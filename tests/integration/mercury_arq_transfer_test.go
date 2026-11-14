@@ -170,6 +170,13 @@ func TestMercuryARQTransfer(t *testing.T) {
 		// and raising the console level perturbs the timing enough to hide
 		// the races worth diagnosing.
 		timing := filepath.Join(t.TempDir(), name+".timing.log")
+		// MERCURY_TEST_LOGDIR keeps it with the console logs: the timing log
+		// is where a station says which optional decode attempt delivered a
+		// frame ("rx decode path"), which an A/B of the receiver switches
+		// counts after the run.
+		if d := os.Getenv("MERCURY_TEST_LOGDIR"); d != "" {
+			timing = filepath.Join(d, name+".timing.log")
+		}
 		timingLogs[name] = timing
 		transport := []string{"-x", "fifo", "-i", rxPath, "-o", txPath}
 		if useSock {
